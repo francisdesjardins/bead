@@ -2251,7 +2251,7 @@ impl Inner {
         Box::pin(async move {
             match answered.await {
                 Answer::Head { head, body } => {
-                    let given = AnswerBody::given(Box::pin(OwnBody(body))).settling(&flow);
+                    let given = AnswerBody::given(Box::pin(OwnBody(body)));
                     let mut response = Response::new(given);
 
                     *response.status_mut() = ::http::StatusCode::from_u16(head.status)
@@ -2262,7 +2262,7 @@ impl Inner {
                     Ok(response)
                 }
                 Answer::Malformed => {
-                    let mut response = Response::new(AnswerBody::whole(None).settling(&flow));
+                    let mut response = Response::new(AnswerBody::whole(None));
 
                     *response.status_mut() = ::http::StatusCode::BAD_REQUEST;
                     fields_into(&mut response, &malformed_fields());

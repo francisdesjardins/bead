@@ -4,13 +4,15 @@
 
 use core::time::Duration;
 
+use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
+
 use super::*;
 use crate::constants::{EnvelopeKind, RESERVATION};
 use crate::http::peer::Told as Heard;
 use crate::http::peer::*;
 use crate::router::types::LIMIT_DEFAULTS;
-use crate::testing::wire::text_of_latin1;
-use crate::testing::{SteppingClock, patience, rest};
+use crate::testing::wire::{ResponseReader, text_of_latin1};
+use crate::testing::{Instant, SteppingClock, patience, rest};
 
 mod life;
 mod listens;
@@ -136,27 +138,171 @@ async fn closes_without_a_response_an_http_2_preface_where_http_1_1_alone_is_ser
     started.stop().await;
 }
 
-#[tokio::test]
-async fn closes_an_idle_kept_alive_socket_without_another_response() {
-    let started = started(&HttpTransportServerOptions {
-        headers_timeout: Some(Duration::from_millis(100)),
-        ..HttpTransportServerOptions::default()
+// the headers timeout the tests of an idle socket's end run, and where that end falls from where
+// its count starts: none before its floor, one within its ceiling
+const IDLE_TIMEOUT: Duration = Duration::from_millis(1_000);
+const IDLE_FLOOR: Duration = Duration::from_millis(900);
+const IDLE_CEILING: Duration = Duration::from_millis(5_000);
+
+// reads `stream` until its end, within the patience: how long that end took from `from`, none
+// when it never came, and what was read before it
+async fn end_of<S: AsyncRead + Unpin>(
+    stream: &mut S,
+    from: Instant,
+) -> (Option<Duration>, Vec<u8>) {
+    let mut came = Vec::new();
+    let mut chunk = [0_u8; 4_096];
+    let ended = patience(PATIENCE, async {
+        loop {
+            match stream.read(&mut chunk).await {
+                Ok(0) | Err(_) => return,
+                Ok(count) => came.extend_from_slice(&chunk[..count]),
+            }
+        }
     })
     .await;
-    let mut socket = RawSocket::on(started.port).await;
 
-    socket
-        .write(&Post::default().request(started.port))
+    (ended.ok().map(|()| from.elapsed()), came)
+}
+
+// an idle socket's end, `took` past where its count started: none before its floor, one within
+// its ceiling
+fn assert_idle_end(took: Option<Duration>, what: &str) {
+    let took = took.unwrap_or_else(|| panic!("{what}: no end within patience"));
+
+    assert!(
+        took >= IDLE_FLOOR,
+        "{what}: ended {took:?} in, before {IDLE_FLOOR:?}"
+    );
+    assert!(
+        took <= IDLE_CEILING,
+        "{what}: ended {took:?} in, past {IDLE_CEILING:?}"
+    );
+}
+
+// reads `stream` into `reader` until its response is whole, within the patience
+async fn read_answer<S: AsyncRead + Unpin>(
+    stream: &mut S,
+    reader: &mut ResponseReader,
+) -> crate::testing::wire::Response {
+    let mut chunk = [0_u8; 4_096];
+
+    patience(PATIENCE, async {
+        while reader.response().is_none() && reader.failed().is_none() {
+            match stream.read(&mut chunk).await {
+                Ok(0) | Err(_) => reader.end(),
+                Ok(count) => reader.feed(&chunk[..count]),
+            }
+        }
+    })
+    .await
+    .expect("a response within patience");
+
+    reader.response().cloned().expect("a response read whole")
+}
+
+// writes a connect on `stream`, reads its 201, then on until its end: how long that end took from
+// the answer, and what came after it
+async fn idle_past_answer<S: AsyncRead + AsyncWrite + Unpin>(
+    (stream, port): (&mut S, u16),
+) -> (Option<Duration>, Vec<u8>) {
+    let mut reader = ResponseReader::new();
+
+    stream
+        .write_all(&Post::default().request(port))
         .await
         .unwrap();
     assert_eq!(
-        socket.response(PATIENCE).await.unwrap().head.status,
+        read_answer(stream, &mut reader).await.head.status,
         201,
         "drawn"
     );
-    socket.next();
-    assert!(socket.ended(PATIENCE).await, "idle socket closed");
-    assert!(socket.reader.head().is_none(), "no second response");
+
+    let mut came = reader.take_rest();
+    let (took, rest) = end_of(stream, Instant::now()).await;
+
+    came.extend_from_slice(&rest);
+
+    (took, came)
+}
+
+#[tokio::test]
+async fn closes_a_kept_alive_socket_idle_past_headers_timeout_without_another_response() {
+    for is_tls in [false, true] {
+        let what = if is_tls { "under TLS" } else { "in clear" };
+        let started = started(&HttpTransportServerOptions {
+            headers_timeout: Some(IDLE_TIMEOUT),
+            tls: is_tls.then(|| crate::testing::tls::server_config().unwrap()),
+            ..HttpTransportServerOptions::default()
+        })
+        .await;
+        let (took, came) = if is_tls {
+            let mut stream = tls_wire::secured(started.port, tls_wire::HTTP_1_1).await;
+
+            idle_past_answer((&mut stream, started.port)).await
+        } else {
+            let mut socket = TcpStream::connect((HOST, started.port)).await.unwrap();
+
+            idle_past_answer((&mut socket, started.port)).await
+        };
+
+        assert_idle_end(took, what);
+        assert!(came.is_empty(), "{what}: no second response");
+        started.stop().await;
+    }
+}
+
+#[tokio::test]
+async fn answers_408_a_head_begun_late_in_a_kept_alive_socket_s_idle_span_that_does_not_come_whole_within_headers_timeout()
+ {
+    let started = started(&HttpTransportServerOptions {
+        headers_timeout: Some(IDLE_TIMEOUT),
+        ..HttpTransportServerOptions::default()
+    })
+    .await;
+    let port = started.port;
+    let (mut reading, mut writing) = TcpStream::connect((HOST, port)).await.unwrap().into_split();
+    let mut reader = ResponseReader::new();
+
+    writing
+        .write_all(&Post::default().request(port))
+        .await
+        .unwrap();
+    assert_eq!(
+        read_answer(&mut reading, &mut reader).await.head.status,
+        201,
+        "drawn"
+    );
+
+    let mut next = ResponseReader::new();
+
+    next.feed(&reader.take_rest());
+    rest(Duration::from_millis(800)).await;
+
+    // * its next head's first byte 800 ms past the answer, then a byte each 300 ms, written on
+    // whatever the server made of them
+    let head = format!(
+        "POST /bead HTTP/1.1\r\nHost: {HOST}:{port}\r\nContent-Type: {BEAD_MEDIA_TYPE}\r\nContent-Length: 0\r\n\r\n"
+    );
+    let begun = Instant::now();
+    let dripping = crate::testing::spawn(async move {
+        for byte in head.into_bytes() {
+            writing.write_all(&[byte]).await.ok();
+            rest(Duration::from_millis(300)).await;
+        }
+    });
+    let answer = read_answer(&mut reading, &mut next).await;
+    let took = begun.elapsed();
+
+    dripping.abort();
+    assert_eq!(answer.head.status, 408, "its head late");
+    assert!(took <= IDLE_CEILING, "408 {took:?} past its first byte");
+
+    let told = started.recorder.told();
+
+    assert_eq!(told.connections.len(), 1, "the one drawn");
+    assert!(told.messages.is_empty(), "nothing handed on");
+    assert!(told.refusals.is_empty(), "nothing told");
     started.stop().await;
 }
 
@@ -3456,7 +3602,7 @@ async fn answers_408_a_head_that_does_not_come_whole_within_headers_timeout_at_i
         ),
     ] {
         let mut socket = RawSocket::on(port).await;
-        let sent_at = crate::testing::Instant::now();
+        let sent_at = Instant::now();
 
         socket.write(head.as_bytes()).await.unwrap();
 

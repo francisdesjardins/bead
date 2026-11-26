@@ -26,7 +26,7 @@ use hyper_util::rt::TokioIo;
 use rustls::ServerConfig;
 use tokio::io::{AsyncRead, AsyncWrite, AsyncWriteExt, ReadBuf};
 use tokio::net::TcpStream;
-use tokio::sync::mpsc;
+use tokio::sync::{Notify, mpsc};
 use tokio_rustls::TlsAcceptor;
 use tokio_util::sync::CancellationToken;
 
@@ -38,6 +38,9 @@ use crate::net::listening::{unless_cancelled, unmarked, within};
 use crate::net::tls::H2;
 use crate::platform::{self, Handle};
 use crate::router::types::BoxFuture;
+
+#[cfg(test)]
+mod tests;
 
 /// What an exchange's socket is cut with: an answer's body ended before its end, or an exchange
 /// whose socket the transport drops before its head.
@@ -54,7 +57,7 @@ impl Error for Cut {}
 
 /// What one socket's connection holds that its exchanges and its end read: whether its socket
 /// still holds what was written to it, whether an answer went before its request's body was whole,
-/// and the heads read and the answers begun.
+/// the heads read, the answers begun and the answers settled.
 #[derive(Debug, Default)]
 pub(crate) struct Flow {
     blocked: AtomicBool,
@@ -63,6 +66,8 @@ pub(crate) struct Flow {
     heads: AtomicU64,
     answered: AtomicU64,
     settled: AtomicU64,
+    // told of each head read and each answer settled, which a session's idle span reads
+    moved: Notify,
     stop: CancellationToken,
     abort: CancellationToken,
     // the paces its answers are held to, each until it judges nothing waits
@@ -86,9 +91,14 @@ impl Flow {
         self.lingers.store(true, Ordering::SeqCst);
     }
 
-    /// A request's head read.
-    pub(crate) fn head_read(&self) {
+    /// A request's head read, its answer under way until what it gives is dropped.
+    pub(crate) fn head_read(self: &Arc<Self>) -> UnderWay {
         self.heads.fetch_add(1, Ordering::SeqCst);
+        self.moved.notify_waiters();
+
+        UnderWay {
+            flow: Arc::clone(self),
+        }
     }
 
     /// An answer begun, its head handed to hyper.
@@ -129,6 +139,29 @@ impl Flow {
     // them
     fn is_answering(&self) -> bool {
         self.heads.load(Ordering::SeqCst) > self.settled.load(Ordering::SeqCst)
+    }
+}
+
+/// A head read, its answer under way: settled once, as it is dropped. The future of its exchange
+/// holds it, then the body of the response it gives, so its answer settles on every path: its
+/// body let go, its stream reset by either end, its exchange cut or dropped before its answer.
+#[derive(Debug)]
+pub(crate) struct UnderWay {
+    flow: Arc<Flow>,
+}
+
+impl UnderWay {
+    /// `response`, its body holding it.
+    fn answered(self, mut response: Response<AnswerBody>) -> Response<AnswerBody> {
+        response.body_mut().under_way = Some(self);
+        response
+    }
+}
+
+impl Drop for UnderWay {
+    fn drop(&mut self) {
+        self.flow.settled.fetch_add(1, Ordering::SeqCst);
+        self.flow.moved.notify_waiters();
     }
 }
 
@@ -238,8 +271,8 @@ pub(crate) struct AnswerBody {
     // is cut at the next poll
     is_cut: bool,
     closed: Option<Closed>,
-    // the flow it settles as hyper lets it go
-    flow: Option<Arc<Flow>>,
+    // the answer it settles as hyper lets it go
+    under_way: Option<UnderWay>,
 }
 
 impl fmt::Debug for AnswerBody {
@@ -262,7 +295,7 @@ impl AnswerBody {
             carried: Carried::Whole(bytes),
             is_cut: false,
             closed: None,
-            flow: None,
+            under_way: None,
         }
     }
 
@@ -276,7 +309,7 @@ impl AnswerBody {
                 is_whole: false,
                 is_cut: false,
                 closed: None,
-                flow: None,
+                under_way: None,
             },
             sender,
         )
@@ -290,14 +323,8 @@ impl AnswerBody {
             carried: Carried::Given(body),
             is_cut: false,
             closed: None,
-            flow: None,
+            under_way: None,
         }
-    }
-
-    /// Itself, settling `flow` as hyper lets it go.
-    pub(crate) fn settling(mut self, flow: &Arc<Flow>) -> Self {
-        self.flow = Some(Arc::clone(flow));
-        self
     }
 
     /// Itself, telling `closed` whether it was taken whole once hyper lets it go.
@@ -317,9 +344,7 @@ impl AnswerBody {
 
 impl Drop for AnswerBody {
     fn drop(&mut self) {
-        if let Some(flow) = self.flow.take() {
-            flow.settled.fetch_add(1, Ordering::SeqCst);
-        }
+        drop(self.under_way.take());
 
         if let Some(closed) = self.closed.take() {
             closed(self.is_whole);
@@ -551,15 +576,14 @@ where
     let mut connection = builder.serve_connection(
         TokioIo::new(socket),
         service_fn(move |request: Request<Incoming>| {
-            serving.head_read();
-
+            let under_way = serving.head_read();
             let is_http_1_0 = request.version() == ::http::Version::HTTP_10
                 && request.method() != ::http::Method::HEAD;
             let answered = exchange(request, &serving);
             let closing: BoxFuture<Result<Response<AnswerBody>, Cut>> = Box::pin(async move {
-                answered
-                    .await
-                    .map(|response| closing_over_http_1_0((response, is_http_1_0)))
+                answered.await.map(|response| {
+                    closing_over_http_1_0((under_way.answered(response), is_http_1_0))
+                })
             });
 
             closing
@@ -672,11 +696,19 @@ fn reset_of(answered: Result<Response<AnswerBody>, Cut>) -> Result<Response<Answ
     }
 }
 
+// what a turn of a session's idle span ends with: its connection's end, or a head read or an
+// answer settled
+enum Turn {
+    Ended,
+    Moved,
+}
+
 // a session served by hyper's HTTP/2, its streams spawned through the platform; its server's stop
 // tells it so, GOAWAY, and ends it once what it answers went, or within its linger when it
-// answers nothing. A session that reads no request's head within `headers_timeout`, from its
-// handshake or since its last head while it answers nothing, is ended so too: hyper arms no timer
-// of its own over HTTP/2
+// answers nothing. A session with no answer under way reads a request's head within
+// `headers_timeout`, counted from its handshake's end and again in full from its last answer's
+// end, or is ended so too; a PING or a SETTINGS moves nothing, and a session answering is kept
+// (spec 15.12): hyper arms no timer of its own over HTTP/2
 async fn serve_http2<S, F>((socket, flow): (S, Arc<Flow>), (options, exchange): (WireOptions, F))
 where
     S: AsyncRead + AsyncWrite + Unpin + Send + 'static,
@@ -698,35 +730,44 @@ where
     let mut connection = pin!(builder.serve_connection(
         TokioIo::new(socket),
         service_fn(move |request: Request<Incoming>| {
-            serving.head_read();
-
+            let under_way = serving.head_read();
             let answered = exchange(request, &serving);
-            let streamed: BoxFuture<Result<Response<AnswerBody>, Reset>> =
-                Box::pin(async move { reset_of(answered.await) });
+            let streamed: BoxFuture<Result<Response<AnswerBody>, Reset>> = Box::pin(async move {
+                reset_of(answered.await.map(|response| under_way.answered(response)))
+            });
 
             streamed
         }),
     ));
 
     // * its own end, its server's stop, or a head that did not come within its timeout while it
-    // answered nothing
+    // answered nothing: each head read and each answer settled begins a turn, its deadline armed
+    // in full while nothing is under way
     let has_ended = loop {
-        let heads = flow.heads.load(Ordering::SeqCst);
-        let served = unless_cancelled(
-            &flow.stop,
-            within(
-                &platform,
-                (
-                    headers_timeout,
-                    poll_fn(|context| connection.as_mut().poll(context)),
-                ),
-            ),
-        )
-        .await;
+        // ! taken before what is under way is read, so that a head or a settle between is heard
+        let moved = flow.moved.notified();
+        let mut moved = pin!(moved);
+
+        moved.as_mut().enable();
+
+        let is_idle = !flow.is_answering();
+        // * the connection polled first: a head it reads beats the deadline in the same poll
+        let turn = poll_fn(|context| {
+            if connection.as_mut().poll(context).is_ready() {
+                return Poll::Ready(Turn::Ended);
+            }
+
+            moved.as_mut().poll(context).map(|()| Turn::Moved)
+        });
+        let served = if is_idle {
+            unless_cancelled(&flow.stop, within(&platform, (headers_timeout, turn))).await
+        } else {
+            unless_cancelled(&flow.stop, turn).await.map(Some)
+        };
 
         match served {
-            Some(Some(_)) => break true,
-            Some(None) if flow.is_answering() || flow.heads.load(Ordering::SeqCst) != heads => {}
+            Some(Some(Turn::Ended)) => break true,
+            Some(Some(Turn::Moved)) => {}
             None | Some(None) => break false,
         }
     };

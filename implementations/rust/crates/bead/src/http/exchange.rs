@@ -204,8 +204,6 @@ impl Responder {
     }
 
     fn body_of(&mut self, body: AnswerBody) -> AnswerBody {
-        let body = body.settling(&self.flow);
-
         match self.closed.take() {
             Some(closed) => body.telling(closed),
             None => body,

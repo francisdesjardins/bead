@@ -7,10 +7,10 @@ use std::collections::BTreeMap;
 
 use super::tls_wire::*;
 use super::*;
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::io::AsyncWriteExt;
 use tokio::net::TcpStream;
-use tokio_rustls::client::TlsStream;
 
+use crate::platform::JoinHandle;
 use crate::testing::Instant;
 
 // the options of a server under the fixture's TLS
@@ -1139,57 +1139,147 @@ async fn serves_http_2_and_http_1_1_on_one_port_a_call_over_each_and_closes_its_
 const PREFACE: &[u8] = b"PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n";
 const SETTINGS: &[u8] = &[0, 0, 0, 0x4, 0, 0, 0, 0, 0];
 
-// whether a socket under TLS ends, its read meeting its end, within the patience
-async fn ends_within_patience(mut stream: TlsStream<TcpStream>) -> bool {
-    let mut read = [0_u8; 4_096];
+// a PING frame of 8 octets of its own (RFC 9113 §6.7)
+const PING: &[u8] = &[0, 0, 8, 0x6, 0, 0, 0, 0, 0, 1, 2, 3, 4, 5, 6, 7, 8];
 
-    patience(PATIENCE, async {
-        loop {
-            match stream.read(&mut read).await {
-                Ok(0) | Err(_) => return,
-                Ok(_) => {}
-            }
+// a socket under TLS to `port` offering h2, `written` written on it once secured, read until its
+// end: how long that end took from its secure connect
+fn watched(port: u16, written: &'static [&'static [u8]]) -> JoinHandle<Option<Duration>> {
+    crate::testing::spawn(async move {
+        let mut stream = secured(port, H2).await;
+        let from = Instant::now();
+
+        for bytes in written {
+            stream.write_all(bytes).await.unwrap();
         }
+
+        end_of(&mut stream, from).await.0
     })
-    .await
-    .is_ok()
 }
 
 #[tokio::test]
 async fn ends_an_http_2_session_that_reads_no_request_s_head_within_headers_timeout_its_preface_its_settings_or_its_head_never_whole()
  {
     let started = started_secure(&HttpTransportServerOptions {
-        headers_timeout: Some(Duration::from_millis(200)),
+        headers_timeout: Some(IDLE_TIMEOUT),
         ..HttpTransportServerOptions::default()
     })
     .await;
-    let silent = secured(started.port, H2).await;
-    let mut settled = secured(started.port, H2).await;
-    let mut halfway = secured(started.port, H2).await;
-
-    settled.write_all(PREFACE).await.unwrap();
-    settled.write_all(SETTINGS).await.unwrap();
-    halfway.write_all(PREFACE).await.unwrap();
-    halfway.write_all(SETTINGS).await.unwrap();
+    // * each watched from its own secure connect, all at once
+    let silent = watched(started.port, &[]);
+    let settled = watched(started.port, &[PREFACE, SETTINGS]);
     // a HEADERS of stream 1 that ends its stream but not its head, `:method: GET` alone
-    halfway
-        .write_all(&[0, 0, 1, 0x1, 0x1, 0, 0, 0, 1, 0x82])
-        .await
+    let halfway = watched(
+        started.port,
+        &[PREFACE, SETTINGS, &[0, 0, 1, 0x1, 0x1, 0, 0, 0, 1, 0x82]],
+    );
+
+    assert_idle_end(silent.await.unwrap(), "no preface");
+    assert_idle_end(settled.await.unwrap(), "no head");
+    assert_idle_end(halfway.await.unwrap(), "a head never whole");
+    started.stop().await;
+}
+
+#[tokio::test]
+async fn ends_an_http_2_session_that_only_pings_within_headers_timeout() {
+    let started = started_secure(&HttpTransportServerOptions {
+        headers_timeout: Some(IDLE_TIMEOUT),
+        ..HttpTransportServerOptions::default()
+    })
+    .await;
+    let stream = secured(started.port, H2).await;
+    let from = Instant::now();
+    let (mut reading, mut writing) = tokio::io::split(stream);
+
+    writing.write_all(PREFACE).await.unwrap();
+    writing.write_all(SETTINGS).await.unwrap();
+
+    // * a PING each 100 ms, written on whatever the server made of them
+    let pinging = crate::testing::spawn(async move {
+        loop {
+            writing.write_all(PING).await.ok();
+            rest(Duration::from_millis(100)).await;
+        }
+    });
+    let (took, _) = end_of(&mut reading, from).await;
+
+    pinging.abort();
+    assert_idle_end(took, "only pings");
+    started.stop().await;
+}
+
+#[tokio::test]
+async fn keeps_an_http_2_session_for_headers_timeout_past_its_last_answer() {
+    let started = started_secure(&HttpTransportServerOptions {
+        headers_timeout: Some(IDLE_TIMEOUT),
+        ..HttpTransportServerOptions::default()
+    })
+    .await;
+    let port = started.port;
+    let stream = secured(port, H2).await;
+    let (session, connection) = h2::client::handshake(stream).await.unwrap();
+    let driven = crate::testing::spawn(async move { connection.await.is_ok() });
+    let connect = || request_of(("POST", port), &[("content-type", BEAD_MEDIA_TYPE)]);
+    let (_, fields, _) = exchanged(&session, (connect(), None)).await;
+    let token = fields[CONNECTION_TOKEN_HEADER].clone();
+    let handle = Arc::clone(&started.server.clients()[0].connection_handle);
+    let (asking, mut sending) = sent(
+        &session,
+        (
+            request_of(
+                ("POST", port),
+                &[
+                    ("content-type", BEAD_MEDIA_TYPE),
+                    (CONNECTION_TOKEN_HEADER, token.as_str()),
+                    ("content-length", "8"),
+                ],
+            ),
+            false,
+        ),
+    )
+    .await;
+
+    sending
+        .send_data(Bytes::from(envelope_of(REQUEST, (1, 0))), true)
         .unwrap();
 
-    assert!(ends_within_patience(silent).await, "no preface: ended");
-    assert!(ends_within_patience(settled).await, "no head: ended");
-    assert!(
-        ends_within_patience(halfway).await,
-        "a head never whole: ended"
+    let asked = patience(PATIENCE, asking).await.unwrap().unwrap();
+
+    // * its answer sent 1500 ms after its head, past its timeout
+    rest(Duration::from_millis(1_500)).await;
+    started
+        .send(&envelope_of(RESULT, (1, 0)), &handle)
+        .await
+        .unwrap();
+    assert_eq!(
+        body_of(asked.into_body()).await,
+        envelope_of(RESULT, (1, 0)),
+        "its answer"
     );
+
+    // * 800 ms past that answer, another exchange on the same session
+    rest(Duration::from_millis(800)).await;
+    assert!(!driven.is_finished(), "its session kept past its answer");
+
+    let (status, _, _) = exchanged(&session, (connect(), None)).await;
+    let last = Instant::now();
+
+    assert_eq!(status, 201, "answered on the same session");
+
+    let ended = patience(PATIENCE, driven).await;
+
+    assert_idle_end(
+        ended.is_ok().then(|| last.elapsed()),
+        "past its last answer",
+    );
+    drop(session);
     started.stop().await;
 }
 
 #[tokio::test]
 async fn keeps_an_http_2_session_past_headers_timeout_while_an_answer_is_under_way() {
     let started = started_secure(&HttpTransportServerOptions {
-        headers_timeout: Some(Duration::from_millis(200)),
+        headers_timeout: Some(IDLE_TIMEOUT),
         ..HttpTransportServerOptions::default()
     })
     .await;
@@ -1229,8 +1319,8 @@ async fn keeps_an_http_2_session_past_headers_timeout_while_an_answer_is_under_w
 
     let asked = patience(PATIENCE, asking).await.unwrap().unwrap();
 
-    // * its answer waits past its timeout many times over, and the linger after it
-    rest(Duration::from_millis(3_000)).await;
+    // * its answer waits past its timeout three times over, and the linger after it
+    rest(Duration::from_millis(3_500)).await;
     assert!(!driven.is_finished(), "its session kept");
     started
         .send(&envelope_of(RESULT, (1, 0)), &handle)
@@ -1242,6 +1332,26 @@ async fn keeps_an_http_2_session_past_headers_timeout_while_an_answer_is_under_w
         "its answer"
     );
     drop(session);
+    started.stop().await;
+}
+
+#[tokio::test]
+async fn closes_a_tls_socket_whose_handshake_does_not_end_within_headers_timeout_without_a_word() {
+    let started = started_secure(&HttpTransportServerOptions {
+        headers_timeout: Some(IDLE_TIMEOUT),
+        ..HttpTransportServerOptions::default()
+    })
+    .await;
+    // * a socket that writes no ClientHello
+    let mut socket = TcpStream::connect((HOST, started.port)).await.unwrap();
+    let (took, came) = end_of(&mut socket, Instant::now()).await;
+
+    assert_idle_end(took, "no handshake");
+    assert!(came.is_empty(), "nothing written");
+    assert!(
+        started.recorder.told().connections.is_empty(),
+        "nothing drawn"
+    );
     started.stop().await;
 }
 

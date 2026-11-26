@@ -2328,6 +2328,64 @@ async fn answers_408_a_head_that_did_not_come_within_its_headers_timeout_unmarke
     stopped(&server).await;
 }
 
+// spec 15.12; whether a 408 comes before its end is not held
+#[tokio::test]
+async fn closes_a_socket_silent_from_its_open_at_a_web_socket_s_address_past_headers_timeout() {
+    let (server, recorder, port) = started(&WebSocketTransportServerOptions {
+        headers_timeout: Some(Duration::from_millis(1_000)),
+        ..briefly_closing()
+    })
+    .await;
+    let mut socket = TcpStream::connect(("127.0.0.1", port)).await.unwrap();
+    let opened = Instant::now();
+    let mut chunk = [0_u8; 4_096];
+
+    patience(PATIENCE, async {
+        while let Ok(read) = socket.read(&mut chunk).await
+            && read > 0
+        {}
+    })
+    .await
+    .unwrap();
+
+    let took = opened.elapsed();
+
+    assert!(took >= Duration::from_millis(900), "ended {took:?} in");
+    assert!(took <= Duration::from_millis(5_000), "ended {took:?} in");
+    assert_eq!(
+        recorder.count(|told| told.connections.len()),
+        0,
+        "nothing drawn"
+    );
+    stopped(&server).await;
+}
+
+#[tokio::test]
+async fn keeps_an_upgraded_web_socket_silent_past_headers_timeout() {
+    let (server, recorder, port) = started(&WebSocketTransportServerOptions {
+        headers_timeout: Some(Duration::from_millis(200)),
+        ..briefly_closing()
+    })
+    .await;
+    let mut client = client(port).await;
+    let handle = recorder.connections(1).await.remove(0);
+
+    // * nothing written for three times its headers timeout
+    rest(Duration::from_millis(600)).await;
+    client.send(binary(&[1, 2, 3])).await.unwrap();
+
+    let (heard, _) = recorder.messages(1).await.remove(0);
+
+    server.send(heard, &handle).unwrap();
+    assert_eq!(
+        next_of(&mut client).await.unwrap().unwrap(),
+        binary(&[1, 2, 3]),
+        "echoed"
+    );
+    assert_eq!(recorder.count(|told| told.closes.len()), 0, "kept");
+    stopped(&server).await;
+}
+
 // ── Its judgement ──────────────────────────────────────────────────────────────────────────────
 
 fn judging(hosts: &[&str], origins: &[&str]) -> WebSocketTransportServerOptions {
