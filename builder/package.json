@@ -43,9 +43,9 @@
     "@playwright/test": "1.65.1",
     "@types/node": "^24.19.2",
     "c8": "12.0.0",
-    "oxfmt": "0.78.0",
-    "oxlint": "^1.93.0",
-    "oxlint-tsgolint": "7.0.2007",
+    "oxfmt": "0.79.0",
+    "oxlint": "^1.94.0",
+    "oxlint-tsgolint": "7.0.2008",
     "typescript-7": "npm:typescript@7.0.2"
   },
   "dependenciesMeta": {
