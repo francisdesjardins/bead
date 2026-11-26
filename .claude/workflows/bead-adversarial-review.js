@@ -79,8 +79,9 @@ You review Bead, at ${REPO}. What is reviewed:
 ${SCOPE}
 CLAUDE.md's rules are injected; these are the ones a stage most often misses:
 - **Change nothing in the repository**, and do not stage, commit, branch or push: write only under ${OUT}/.
-- Temporary files and probes go under ${OUT}/ and nowhere else; run builds and tests with \`TMP=${SCRATCH}/tmp TEMP=${SCRATCH}/tmp\`. \`${VENV}\` runs \`spec/check.py\` and the generators.
+- Temporary files and probes go under ${OUT}/ and nowhere else; run builds and tests with \`TMP=${SCRATCH}/tmp TEMP=${SCRATCH}/tmp CARGO_INCREMENTAL=0\`. \`${VENV}\` runs \`spec/check.py\` and the generators.
 - The toolchain: ${TOOLCHAIN}.
+- Stop every process and watcher you started before you answer: a server, a broker's container, a browser, a Monitor; \`dotnet build-server shutdown\` after a C# build.
 - Run \`node .claude/local/check.mjs <file>\` from ${REPO} over every file you write, and never write a protected word.
 - Run a gate in the foreground, with a timeout that fits it (up to ten minutes); a run in the background only beside another you run at once, then one Monitor until-loop that waits on both, never sleeping and reading their output again and again.
 - Before 1.0.0, a decision record or a released behaviour yields to a standard, an industry practice, a cleaner split, stability or clarity: name it and recommend the revision outright.

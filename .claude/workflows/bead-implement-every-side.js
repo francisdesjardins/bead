@@ -31,11 +31,11 @@ export const meta = {
 //   held to the fast gates and its build there, in place of proposing whole-file commits; the
 //   series' last tree is the working tree the integration ran every gate over, so no suite runs
 //   twice;
-// - suites: 'local' by default, the integration running every suite `tools/ci-scope.mjs --local`
-//   gives for what the branch changes; 'ci' leaves the whole suites to GitHub's CI on the feature
+// - suites: 'local' by default, the integration running every suite `tools/ci-scope.mjs --run`
+//   runs for what the branch changes; 'ci' leaves the whole suites to GitHub's CI on the feature
 //   branch, which the session pushes once the series lands (the user, 2026-10-14: a push of a
-//   feature/* branch to save tokens and time), the integration running the gates `--local --gates`
-//   gives and the tests of what changed;
+//   feature/* branch to save tokens and time), the integration running the gates `--run --gates`
+//   runs and the tests of what changed;
 // - notes: what the stages need beyond the design, in a few lines.
 // - integrationNote: a word for the integration alone, so that a resumed run replays the stages
 //   and runs the integration again (a stage finished apart from the run, say).
@@ -63,7 +63,7 @@ const PARTS = [
 ];
 const OUT = `${SCRATCH}/${SLUG}`;
 const SUITES = args.suites || 'local';
-const TMP = `TMP=${SCRATCH}/tmp TEMP=${SCRATCH}/tmp`;
+const TMP = `TMP=${SCRATCH}/tmp TEMP=${SCRATCH}/tmp CARGO_INCREMENTAL=0`;
 const RATIONALE = DESIGN.replace(/[^/\\]*$/u, 'rationale.md');
 
 // what a stage reads of the design: the shared part and its own section, the reasons where it
@@ -79,9 +79,10 @@ const readsOf = (key) => {
 const COMMON = `
 You work on Bead, at ${REPO}, on the branch \`${BRANCH}\`, checked out. You implement ${DESIGN}, the settled design: where it is silent, keep to the spec and the records, and say what you chose. CLAUDE.md's rules are injected; these are the ones a stage most often misses:
 - **Do not stage, commit, branch or push.**
-- Temporary files go under ${OUT}/ and nowhere else; run builds and tests with \`${TMP}\`. \`${VENV}\` runs \`spec/check.py\` and the generators; the toolchain: ${TOOLCHAIN}.
+- Temporary files go under ${OUT}/ and nowhere else; run builds and tests with \`${TMP}\`: cargo never empties \`target/*/incremental\`, and each feature set a Rust gate builds piles up there. \`${VENV}\` runs \`spec/check.py\` and the generators; the toolchain: ${TOOLCHAIN}.
 - Run \`node .claude/local/check.mjs <file>\` from ${REPO} over every file you write, and never write a protected word.
 - Run a gate in the foreground, with a timeout that fits it (up to ten minutes); a run in the background only beside another you run at once, then one Monitor until-loop that waits on both, never sleeping and reading their output again and again.
+- Stop every process and watcher you started before you answer: a server, a broker's container, a browser, a Monitor; \`dotnet build-server shutdown\` after a C# build.
 - Parity: a test on one side has its twin on the other, named by the same sentence (\`Underscored_sentence\` in C#, \`snake_case_sentence\` in Rust); a difference that remains is a row of \`docs/support.md\` with the test that shows it.
 ${args.notes ? `${args.notes}\n` : ''}`;
 
@@ -169,9 +170,7 @@ const SERIES = `build the design's commits, in its order, with its subjects, bod
 // * the gates and suites are what tools/ci-scope.mjs maps the branch's changes to, as CI on the
 // feature branch runs them: one table, never a list written out here
 const SCOPE =
-  SUITES === 'ci'
-    ? '`node tools/ci-scope.mjs --local --gates`'
-    : '`node tools/ci-scope.mjs --local`';
+  SUITES === 'ci' ? '`node tools/ci-scope.mjs --run --gates`' : '`node tools/ci-scope.mjs --run`';
 const SUITE_GATES =
   SUITES === 'ci'
     ? "the tests of what changed, by file (`yarn test <files>`), by project (`dotnet test --project tests/<project>`) and by Rust package (`cargo test -p <package> --all-features --locked`); the interop both ways when a transport or the interop moved (`dotnet test --project tests/Bead.Interop.Tests` with `BEAD_INTEROP_REQUIRED=1`, then `yarn test:interop`): the whole suites are GitHub's CI's, on the feature branch the session pushes once the series lands; say so in the report"
@@ -181,7 +180,7 @@ phase('Integrate');
 const integration = await agent(
   `${COMMON}
 # Your task: integrate (effort high)
-Read ${DESIGN} whole, every stage's section; ${RATIONALE}, beside it where the round wrote one, where you need a reason. Check that every side does what the design says, alike, as the conformance files and the twin tests prove, and that the records, the matrix and the CHANGELOG say what landed. Fix what is broken. The stages ran their suites without the interop between the sides: it runs here, once, over the settled tree, both ways, in the suites below. Run every gate with \`${TMP}\`: ${GENERATE}, and check that nothing more moves; \`${VENV} spec/check.py\`; then every command ${SCOPE} prints, in its order and from the folders it names, \`${VENV}\` for its \`python\`: what the branch changes against develop, the working tree included, maps to the commands of the CI jobs it reaches, the Commits job's first (! \`check-citations\` and \`check-details\` read the files git lists: \`git add -N\` the files the stages added before the run); ${SUITE_GATES}; the gates of every stage the design names; the names check over every file \`git status --porcelain\` lists. Then ${args.series ? SERIES : PLAN} Write your report whole to ${reportOf('integrate')}: what you fixed, each gate's result, the test counts and the commits. Return at most ten lines: what you fixed, each gate's verdict, the test counts, the commits, and that path.
+Read ${DESIGN} whole, every stage's section; ${RATIONALE}, beside it where the round wrote one, where you need a reason. Check that every side does what the design says, alike, as the conformance files and the twin tests prove, and that the records, the matrix and the CHANGELOG say what landed. Fix what is broken. The stages ran their suites without the interop between the sides: it runs here, once, over the settled tree, both ways, in the suites below. Before the suites, \`node tools/caches.mjs --min 1G\` and the free space of the repository's drive (\`df -h .\`): under 25 GB, delete \`implementations/rust/target/llvm-cov-target\` and every \`implementations/rust/target/*/incremental\` first; still under, stop and say so. Run every gate with \`${TMP}\`: ${GENERATE}, and check that nothing more moves; \`${VENV} spec/check.py\`; then, with the toolchain first on PATH so that its \`python\` is \`${VENV}\`, ${SCOPE}, which runs in order, each from its folder, the commands of the CI jobs that what the branch changes against develop reaches, the working tree included, the Commits job's first, and stops at the first that fails (! \`check-citations\` and \`check-details\` read the files git lists: \`git add -N\` the files the stages added before the run); ${SUITE_GATES}; the gates of every stage the design names; the names check over every file \`git status --porcelain\` lists. Then ${args.series ? SERIES : PLAN} At the end, delete \`implementations/rust/target/llvm-cov-target\` and every \`implementations/rust/target/*/incremental\`, and the series clone's \`target/\` where it has one. Write your report whole to ${reportOf('integrate')}: what you fixed, each gate's result, the test counts, the commits and the space freed. Return at most ten lines: what you fixed, each gate's verdict, the test counts, the commits, and that path.
 ${
   args.integrationNote
     ? `${args.integrationNote}

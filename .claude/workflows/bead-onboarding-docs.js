@@ -38,6 +38,7 @@ Rules every stage holds:
 - A snippet's comments follow CLAUDE.md's comment tags (\`!\`, \`?\`, \`TODO\`, \`*\`, or plain).
 - Temporary files and the proving project live under ${OUT}/, never in the repository; the toolchain: ${TOOLCHAIN}. Run \`node .claude/local/check.mjs <file>\` from ${REPO} over every file you write, and never write a protected word.
 - Do not stage, commit, branch or push.
+- Stop every process and watcher you started before you answer: a server, a broker's container, a browser, a Monitor; \`dotnet build-server shutdown\` after a C# build.
 The scenario the guides build: ${SCENARIO}
 ${ARGS.notes ? `${ARGS.notes}\n` : ''}`;
 
@@ -68,7 +69,7 @@ From ${OUT}/facts.md and the proven project ${OUT}/project/ (its files copied, n
 3. docs/guides/architecture-overview.md: the mental model, .proto to blueprint to beadc.yaml to targets, as a diagram (Mermaid, which GitHub renders), and a decision matrix of Bead against gRPC-Web, Connect and SignalR, each cell a fact of Bead's sources or of the other's own public documentation, with its link; no claim about another project that its documentation does not make.
 4. The root README.md: a prominent "Getting started for teams" link to docs/guides/getting-started.md, right after its "At a glance".
 5. A line under the CHANGELOG's [Unreleased] ### Added.
-Then every command \`node tools/ci-scope.mjs --local --gates\` prints for what you changed, from the folders it names (\`git add -N\` a new guide first, since \`check-citations\` reads the files git lists; the README's change asks the spec's generators and \`spec/check.py\`, their \`python\` a virtual environment of \`spec/requirements.txt\`), and the names check over each file. Write ${OUT}/written.md: each file, what it holds, the gates. Return at most ten lines.
+Then \`node tools/ci-scope.mjs --run --gates\`, which runs the gates of what you changed, each from its folder, and stops at the first that fails (\`git add -N\` a new guide first, since \`check-citations\` reads the files git lists; the README's change asks the spec's generators and \`spec/check.py\`, their \`python\` a virtual environment of \`spec/requirements.txt\`), and the names check over each file. Write ${OUT}/written.md: each file, what it holds, the gates. Return at most ten lines.
 The proving stage said: ${proved || '(none)'}`,
   { label: 'write', phase: 'Write', effort: 'high' }
 );

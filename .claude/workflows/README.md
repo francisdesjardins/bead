@@ -15,6 +15,11 @@ most: what it did, the gates' verdicts, where its report is. A later stage reads
 workflow returns the paths, the counts, its French summary where it has one and the decisions for
 the user, never a whole plan, a stage's report or the objections themselves.
 
+Every stage stops the processes and watchers it started before it answers. Rust builds and tests
+run with `CARGO_INCREMENTAL=0`, as CI's do. The integration of `bead-implement-every-side` runs
+the gates by `tools/ci-scope.mjs --run`, checks the drive's free space before its suites and
+deletes the Rust coverage and incremental caches after them.
+
 A change that reaches across the languages runs a round of the Tenth Man, then the user decides,
 then the design is implemented. A freeze runs an adversarial review first, and a release brings its documents to itself.
 
