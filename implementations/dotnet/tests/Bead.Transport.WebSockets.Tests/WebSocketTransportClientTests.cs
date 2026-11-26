@@ -3600,6 +3600,28 @@ public sealed partial class WebSocketTransportClientTests : IAsyncLifetime
     }
 
     [Fact]
+    public async Task Runs_on_its_platform_s_clock_when_given_none_and_on_a_test_s_once_one_replaces_it()
+    {
+        var platform = new FakeTimeProvider();
+
+        await using var onItsPlatform = new WebSocketTransportClient();
+        await using var onATest = new WebSocketTransportClient(new WebSocketTransportClientOptions { Platform = platform });
+
+        Assert.Same(TimeProvider.System, onItsPlatform.Clock);
+        Assert.Same(platform, onATest.Clock);
+
+        // * a replaced platform clock is one of its own, as any clock that is not the platform's
+        var refusal = Assert.Throws<ArgumentException>(() =>
+        {
+            return new RouterClient(onATest, new RouterClientOptions { Clock = TimeProvider.System });
+        });
+
+        Assert.Equal(
+            "a client's router runs on the clock of its transport, one of its own, and was given another, the platform's",
+            refusal.Message);
+    }
+
+    [Fact]
     public async Task Drops_a_server_that_never_answers_its_disconnect_once_its_close_timeout_passed_telling_no_error_its_close_as_the_disconnect_said()
     {
         using var listener = new Listener(IPAddress.Loopback);
