@@ -18,6 +18,7 @@ import { ParcelKind, readParcel, writeParcel } from '../broker-parcel';
 import { createBrokerParticipant } from '../broker-participant';
 import { BROKER_DELIVERIES, BROKER_PUBLISHED } from '../constants';
 import { CancelError, GenericError, ProgrammerError } from '../errors';
+import { PLATFORM } from '../clock';
 import {
   createMqttBrokerAdapter,
   type IMqttBrokerAdapter,
@@ -40,6 +41,7 @@ import {
 } from './loopback-fixtures';
 import { createMqttScript, type IMqttScript, type IScriptedLink } from './mqtt-script';
 import { PKI } from './tls-front';
+import { createTestClock, duesOn } from './fixtures';
 
 // constants
 
@@ -1295,7 +1297,8 @@ test.describe('createMqttBrokerAdapter', () => {
   });
 
   test('sends its stop’s DISCONNECT of 0x00 all the same where an UNSUBACK refuses or none comes, what it was handed and its UNSUBACKs awaited within one connectTimeout of its call (spec 15.26, 15.30)', async () => {
-    const adapter = adapterOf(script, { connectTimeout: 1_000 });
+    const clock = createTestClock();
+    const adapter = adapterOf(script, { connectTimeout: 1_000, [PLATFORM]: clock });
     const { downs } = heardOf(adapter);
     const link = await linkUp({ adapter, script });
 
@@ -1308,11 +1311,16 @@ test.describe('createMqttBrokerAdapter', () => {
 
     const publishing = adapter.publish({ payload: Uint8Array.of(1), topic: ['bead', 'i', 'bob'] });
     const publish = await link.next('publish');
-    const startedAt = Date.now();
-    const stopping = adapter.stop();
+    const startedAt = clock.now;
+    let isStopped = false;
+    const stopping = adapter.stop().then(() => {
+      isStopped = true;
+    });
 
     // * most of its connectTimeout spent on what it was handed
-    await sleep(700);
+    expect(duesOn(clock)).toContain(1_000);
+    await clock.tickAsync(700);
+    expect(isStopped).toBe(false);
     link.send({ cmd: 'puback', messageId: publish.messageId ?? 0, reasonCode: 0 });
     expect(await publishing).toBe(BROKER_PUBLISHED.TAKEN);
 
@@ -1326,12 +1334,15 @@ test.describe('createMqttBrokerAdapter', () => {
       messageId: refused.messageId ?? 0,
       properties: {},
     });
+    await until(() => {
+      return duesOn(clock).includes(300);
+    });
+    expect(duesOn(clock)).toContain(300);
+    await clock.tickAsync(299);
+    expect(isStopped, 'its connectTimeout waited').toBe(false);
+    await clock.tickAsync(1);
     await stopping;
-
-    const spent = Date.now() - startedAt;
-
-    expect(spent, 'its connectTimeout waited').toBeGreaterThanOrEqual(950);
-    expect(spent, 'one connectTimeout from its call, not one after its drain').toBeLessThan(1_500);
+    expect(clock.now - startedAt, 'one connectTimeout from its call').toBe(1_000);
     expect(
       ((await link.next('disconnect')) as { reasonCode?: number }).reasonCode ?? 0,
       'its DISCONNECT, no will'
@@ -2898,15 +2909,28 @@ test.describe('createMqttBrokerAdapter', () => {
   });
 
   test('fails its start once its password provider outlives its connect timeout, and takes no late answer', async () => {
+    const clock = createTestClock();
     const late = Promise.withResolvers<string>();
     const adapter = adapterOf(script, {
+      [PLATFORM]: clock,
       connectTimeout: 200,
       passwordProvider: () => {
         return late.promise;
       },
     });
     const { downs } = heardOf(adapter);
-    const error = await failureOf(adapter.start());
+    let isSettled = false;
+    const failing = failureOf(adapter.start()).then((error) => {
+      isSettled = true;
+
+      return error;
+    });
+
+    await clock.tickAsync(199);
+    expect(isSettled, 'its password still awaited').toBe(false);
+    await clock.tickAsync(1);
+
+    const error = await failing;
 
     expect(error).toBeInstanceOf(GenericError);
     expect((error as Error).message).toBe(
@@ -2920,21 +2944,39 @@ test.describe('createMqttBrokerAdapter', () => {
 
     // * one connectTimeout from its start's call: its CONNACK waits what its ask left of it
     const slow = adapterOf(script, {
+      [PLATFORM]: clock,
       connectTimeout: 600,
       passwordProvider: async () => {
-        await sleep(450);
+        await new Promise<void>((resolve) => {
+          clock.setTimeout(() => {
+            resolve();
+          }, 450);
+        });
 
         return PASSWORD;
       },
     });
-    const began = performance.now();
-    const waiting = failureOf(slow.start());
+    const began = clock.now;
 
+    isSettled = false;
+
+    const waiting = failureOf(slow.start()).then((error) => {
+      isSettled = true;
+
+      return error;
+    });
+
+    await clock.tickAsync(449);
+    expect(isSettled, 'its password still awaited').toBe(false);
+    await clock.tickAsync(1);
     await script.link();
+    await clock.tickAsync(149);
+    expect(isSettled, 'its CONNACK still awaited').toBe(false);
+    await clock.tickAsync(1);
     expect(String(await waiting)).toContain(
       'the link of ada had no CONNACK within 600 ms, its connectTimeout'
     );
-    expect(performance.now() - began).toBeLessThan(900);
+    expect(clock.now - began, 'one connectTimeout from its call').toBe(600);
   });
 
   test('ends its start once stopped as its password is asked, and links at the next start, asked anew', async () => {
