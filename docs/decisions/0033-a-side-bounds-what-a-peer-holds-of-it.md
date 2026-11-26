@@ -9,14 +9,15 @@
   side's close timeout, the pace and the bound beside 15.3's heartbeat, 15.6's 408 and 503, 15.7's
   answer that could not be written, an HTTP exchange whose outcome is unknown, lost as 15.7 has an
   exchange lost, 15.9's outbox reported, and 15.12's bounds, the transports each holds on, its pace and its
-  head and body, its read of an HTTP/1 socket behind the answer under way and its requests' order,
-  and what a client reads, by `maximumBodyBytes`; over a broker, 15.18's half-open place, 15.20's
-  parts and 15.23's bounds; in [`spec/debugging.md`](../../spec/debugging.md), 9.4's call past those
-  its connection has it answer and its transfer's opening past those it receives, and 9.6's
-  requester; in [`spec/transcoding.md`](../../spec/transcoding.md), 8.6's and 8.7's stream whose
-  client goes unseen and 10.2's read of a socket; the conversations of 9.2's step 3, the transports'
-  cases of a WebSocket server's connections, a body's rate, a head's time and requests pipelined,
-  the transcoding's exchange of requests pipelined, the step `behind` both files take, and the
+  head and body, the idle span of an HTTP socket or HTTP/2 session and a TLS handshake, on every
+  listener that reads a head, its read of an HTTP/1 socket behind the answer under way and its
+  requests' order, and what a client reads, by `maximumBodyBytes`; over a broker, 15.18's half-open
+  place, 15.20's parts and 15.23's bounds; in [`spec/debugging.md`](../../spec/debugging.md), 9.4's
+  call past those its connection has it answer and its transfer's opening past those it receives,
+  and 9.6's requester; in [`spec/transcoding.md`](../../spec/transcoding.md), 8.6's and 8.7's stream
+  whose client goes unseen and 10.2's read of a socket; the conversations of 9.2's step 3, the
+  transports' cases of a WebSocket server's connections, a body's rate, a head's time, an idle
+  socket's close and requests pipelined, the transcoding's exchange of requests pipelined, the step `behind` both files take, and the
   durations of the bounds it adds.
   15.3's heartbeat on silence is this record's too: its ping goes ahead of what waits, and its echo
   alone answers it. 15.21's heartbeat, which any parcel answers, is
@@ -244,6 +245,43 @@ half-close, so on the C# side the write side ends with the close itself, once it
 2 seconds passed (`docs/support.md`, "A request's head held to `headersTimeout`, and an answer's
 close in stages, as each platform does them").
 
+**An idle socket closes past `headersTimeout`**, the head's own bound, on every socket an HTTP
+server reads heads on: the HTTP transport's, a gateway's own listener, and a WebSocket server's
+address before its upgrade (spec 15.12). A socket, or an HTTP/2 session, with no answer under way
+reads a request's head whole within `headersTimeout`, or is closed
+([RFC 9112 §9.5](https://www.rfc-editor.org/rfc/rfc9112#section-9.5)). The count starts at the
+socket's open, under TLS at its handshake's end, and again in full at the end of its last answer. A
+head read whole stops it; a PING or a SETTINGS
+([RFC 9113 §6.7](https://www.rfc-editor.org/rfc/rfc9113#section-6.7), §6.5) stops nothing. A session
+with an answer under way is kept, however long the answer takes. A head is answered 408 when it does
+not come whole within `headersTimeout` counted from its first byte at the latest; a platform may
+count it from the start of the idle span, as hyper does, a row of `docs/support.md`, "An idle
+socket's close". Under TLS, a handshake not done within `headersTimeout` is closed without a word.
+The close comes past its time, and within 2 seconds of it, on the platform's clock. Over HTTP/1.1
+the socket closes without another response; one that sent nothing at all may get HTTP's 408 first,
+as its platform writes it
+([RFC 9110 §15.5.9](https://www.rfc-editor.org/rfc/rfc9110#section-15.5.9)). Over HTTP/2 the session
+ends by a GOAWAY of `NO_ERROR` where its platform writes one
+([RFC 9113 §6.8](https://www.rfc-editor.org/rfc/rfc9113#section-6.8)), and its socket closes within
+2 seconds more, the linger, a GOAWAY written or not. Such a close closes no Bead connection. Each
+head read whole marks one answer under way, and its end is marked once on every path: its body let
+go, its stream reset by either end, its exchange cut, its handler thrown. One left unmarked would
+keep a session for ever. The TypeScript transport sets `keepAliveTimeout` to `headersTimeout` on
+every server that has a `headersTimeout`, and times each `node:http2` session and each TLS handshake
+itself, the handshake from `'connection'` to `'secureConnection'`, since `handshakeTimeout` is a
+creation option of the application's server. The C# transports set Kestrel's
+`Limits.KeepAliveTimeout` and `HttpsConnectionAdapterOptions.HandshakeTimeout` to `HeadersTimeout`,
+and time each HTTP/2 connection in a `ListenOptions.Use` after `UseHttps`, ending it by
+`RequestClose()`, since a PING keeps a session alive on Kestrel's own timer. The Rust side keeps
+hyper's `header_read_timeout` and the handshake's deadline, and arms `serve_http2`'s deadline again
+in full as its last answer settles. Every client Bead builds lets an idle pooled socket go after
+4 s, under every server's bound at its default: the C# side's own `SocketsHttpHandler`s by
+`PooledConnectionIdleTimeout`, undici's own 4 s on the TypeScript side, `POOL_IDLE_TIMEOUT` on the
+Rust side. A `headersTimeout` under 5 s races a pool that no `Keep-Alive` hint tells, as Kestrel and
+hyper send none. One bound for a head and an idle span is Bead's leveling to hyper's one timer, a
+row of `docs/support.md`'s "Leveled down"; a bound of its own for the idle span, as Go's
+`IdleTimeout` and Envoy's `idle_timeout`, is ahead, on every side at once.
+
 **Over HTTP/1, a server reads a socket no further than a bound of its own behind the answer under
 way, and keeps it** (spec 15.12, transcoding 10.2). Requests pipelined behind an answer under way
 are each answered in their turn once the answers ahead end, however many come in one write, and no
@@ -410,14 +448,16 @@ sends held to twice the bound; a connection refused twice the bound in a row pas
 the close reported; and a received transfer whose call's resolver outlives it keeping a place among
 twice `maximumTransfers`. `spec/transports.json`: a WebSocket server's connections, in all and
 behind a proxy it names, refused 503 and told, its origin judged first; a body slower than its rate
-refused 408, its socket's end read and its Bead connection answering after; and a head that does not
+refused 408, its socket's end read and its Bead connection answering after; a head that does not
 come whole answered 408 at either transport, on the real clock, its `after` 100 ms short of its time
-and its `within` 4 seconds past it. `spec/durations.json`: `sendGracePeriod`, `headersTimeout` and
-`bodyGracePeriod`, each refused for never; `spec/metrics.json`, the exits of a request past the
-bound and of one past the calls answered and those their resolvers outlive. Twins by the same
-sentence ([0004](0004-one-behaviour-in-every-language.md)) hold what no runner plays: each router's
-`answers CAPACITY_EXCEEDED a request past the calls its peer has it answer on its connection, before
-its route, its credential or its transfer, and takes one once a call ends` and `answers
+and its `within` 4 seconds past it; and an HTTP socket kept alive with no head and no answer under
+way closed past `headersTimeout`, nothing written, on the same clock and between the same two.
+`spec/durations.json`: `sendGracePeriod`, `headersTimeout` and `bodyGracePeriod`, each refused for
+never; `spec/metrics.json`, the exits of a request past the bound and of one past the calls answered
+and those their resolvers outlive. Twins by the same sentence
+([0004](0004-one-behaviour-in-every-language.md)) hold what no runner plays: each router's `answers
+CAPACITY_EXCEEDED a request past the calls its peer has it answer on its connection, before its
+route, its credential or its transfer, and takes one once a call ends` and `answers
 ENVELOPE_TOO_LARGE a request that came whole past chunkBytes, and holds nothing of it`, its
 requester's `fails before it goes a call past the calls its peer answers at once, and sends one once
 a call is answered`, its client's `answers CAPACITY_EXCEEDED a command past the calls its server has
@@ -457,17 +497,32 @@ it goes on sending, and keeps its connection; a body at its rate taken`, `closes
 answer written before its body is whole, so a client that sends at full speed reads it, and its
 connection then answers a POST`, `answers 408 a head that does not come whole within headersTimeout,
 at its address and its WebSocket’s, past it and within 2 seconds of it`, and the TypeScript side's
-`sets headersTimeout, no requestTimeout and a connectionsCheckingInterval of a second on every
-server createServer builds, its 408 within a second of its time`, beside the C# side's
-`Sets_its_HeadersTimeout_and_no_body_rate_of_Kestrel_s_on_every_listener`, the Rust side holding
-hyper's timer by the 408's twin, so a change of the platform's fails a test. Requests pipelined:
-`spec/transports.json` and `spec/transcoding.json` write them in one write by the step `behind`,
-behind a listen held and behind a call its timeout ends, each answered in its turn and the socket
-kept; twins by the same sentence hold each server's stop, `stops reading requests pipelined behind a
-held listen, and keeps its socket` and its gateway's behind a stream, every request answered once
-the hold ends, and `frees the place of a stream within two heartbeats once its client leaves with a
-request pipelined behind it`, the TypeScript side's own its pause, its resume and its budget.
-`docs/support.md` names them.
+`sets headersTimeout, keepAliveTimeout, no requestTimeout and a connectionsCheckingInterval of a
+second on every server createServer builds, its 408 within a second of its time` and `sets a
+server’s headersTimeout and keepAliveTimeout, no requestTimeout and a check each second, and leaves
+one without them as it is`, beside the C# side's
+`Sets_its_HeadersTimeout_its_KeepAliveTimeout_its_HandshakeTimeout_and_no_body_rate_of_Kestrel_s_on_every_listener`,
+the Rust side holding hyper's timer by the 408's twin, so a change of the platform's fails a test.
+An idle socket's close: each HTTP server's `closes a kept-alive socket idle past headers timeout
+without another response`, in clear and under TLS, `ends an HTTP/2 session that reads no request’s
+head within headers timeout, its preface, its settings or its head never whole`, `ends an HTTP/2
+session that only pings within headers timeout`, `keeps an HTTP/2 session for headers timeout past
+its last answer`, `keeps an HTTP/2 session past headers timeout while an answer is under way`,
+`closes a TLS socket whose handshake does not end within headers timeout without a word` and
+`answers 408 a head begun late in a kept-alive socket’s idle span that does not come whole within
+headers timeout`; each gateway's `closes a kept-alive socket idle past headers timeout at its own
+listener without another response`, and the TypeScript and Rust gateways' `ends an HTTP/2 session at
+its own listener that reads no request’s head within headers timeout`, the C# gateway's own listener
+serving HTTP/1.1 alone in clear; each WebSocket server's `closes a socket silent from its open at a
+WebSocket’s address past headers timeout` and `keeps an upgraded WebSocket silent past headers
+timeout`. Each timing twin runs `headersTimeout` 1000, no end before 900 ms from where its count
+starts and an end within 5000 ms. Requests pipelined: `spec/transports.json` and
+`spec/transcoding.json` write them in one write by the step `behind`, behind a listen held and
+behind a call its timeout ends, each answered in its turn and the socket kept; twins by the same
+sentence hold each server's stop, `stops reading requests pipelined behind a held listen, and keeps
+its socket` and its gateway's behind a stream, every request answered once the hold ends, and `frees
+the place of a stream within two heartbeats once its client leaves with a request pipelined behind
+it`, the TypeScript side's own its pause, its resume and its budget. `docs/support.md` names them.
 
 ## The Tenth Man
 
@@ -653,3 +708,26 @@ holds:
 | The transports' case plays the keep of a socket after a refusal of the server's own of a request that declares no body, many times over, where record 0004 was to say that no case plays it. A `behind` written after an answer that closes lands on a socket its server ended or lingers on, so whether it fails depends on when the server's close arrives, and no later `behind` can play the close.                                                 | Accepted. Record 0004 says the cases of the step `behind` play the order, pipelining and the keep after a refusal of a request that declares no body, 15.12 being one unit; and that the close after a refusal of a request that declares a body needs the requests behind it in that request's own write, which no case writes. A `behind` on a socket its server ended writes what the platform takes, and a write refused fails no step, as the `$comment` says.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
 | What the schemas and the files left out fails CI or a player. The cases and the `$comment` belong in the generators, which CI runs and diffs. `spec/check.py`'s timer rule clears its timer on a `send` but not on a `behind`, and its counts hold figures `docs/support.md` and the README state. Each player's rule of one act a step must take `behind`, and the check that nothing more was told must say whether a `behind` is a point it runs at. | Accepted. The generators write the cases and the `$comment`s. `spec/check.py` clears its armed timer on a `behind` as on a `send`, and the counts move with the figures they hold. Each player's rule of one act a step takes `behind`. The server reported nothing and told no refusal it was not expected to before each `send`, `behind` and `close`, as the `$comment` says.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
 | The transcoding's case holds nothing: its first request is answered at once, so the requests are pipelined behind each other, not behind a call. Forty is the TypeScript side's 32 plus 8: the one shared case that reaches the pause is sized by one side's internal constant. One exchange now names a socket that carries several responses, which the files do not say.                                                                             | Accepted. The transcoding's case holds a call of `hang` until its gateway's `timeout` of 1,000 ms ends it with a 504, on the real clock, its requests written once its `until` saw the call taken. Played on the wire against the C# and Rust interop servers, the 504 keeps the socket and the requests behind it are answered in order. Both cases pipeline 200 requests, sized by their octets: past hyper's first read of a socket, 8,192 octets, and far past the TypeScript side's 32, within one `behind`'s bound. Kestrel's 1 MB lies past that bound, and its stop twins cross it. The `$comment`s say one exchange carries several responses where a `behind` wrote on it, and so does the schema's `exchange`.                                                                                                                                                                                                                                                                                                                                                                                                   |
+
+### On an idle socket's close
+
+One idle bound over HTTP/1.1 and HTTP/2 met the Tenth Man at xhigh effort. One dissenter raised
+eleven objections, each checked against the code and against probes of Kestrel and of Node 24.9
+and 26: seven were accepted, four in part, none refused. The user chose one bound,
+`headersTimeout`, for the head and the idle span, a row of `docs/support.md`'s "Leveled down"; a
+bound of its own for the idle span is ahead, by a round of its own. Each objection, with the answer
+that holds:
+
+| Objection                                                                                                                                                                                                                                                 | Answer                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| The HTTP/2 bound has no single start. Counting "since its last head" ends a session as an answer that outlasted T ends. Kestrel counts from the stream's end, Rust in fixed windows of T, TypeScript's timer is unstated, and no twin holds the timing.   | In part. The span counts from the socket's open, under TLS its handshake's end, and again in full from its last answer's end; a head read whole stops it. Rust's loop becomes a deadline re-armed at the last settle, TypeScript re-arms at its last stream's close, and `keeps an HTTP/2 session for headers timeout past its last answer` holds an answer that outlasts T. An answer's end is marked on every path: on Rust a head's guard settles a cut or reset exchange that no `AnswerBody` settles, on C# a `finally` of `Exchanging`, on TypeScript a stream's `'close'`. Kestrel's T + 2 s sets no ceiling: the transport's own timer ends C#'s session at T, its GOAWAY in the millisecond of `RequestClose()`, Kestrel's keep-alive the backup. The twins hold a floor of 900 ms and a ceiling of 5000 ms at T = 1000. |
+| The C# plan rests on a wrong premise: with `KeepAliveTimeout` = T Kestrel ends the silent and preface-only sessions; only a PING-only one stays, and a frame-watching middleware would be a second framer.                                                | Accepted. `KeepAliveTimeout` = `HeadersTimeout`, and a timer per connection in a `listen.Use` after `UseHttps`, on `h2` alone by `ITlsApplicationProtocolFeature` (probed), told of each head by `Exchanging` through `Connection.Id` and of each answer's end by a `finally` of `Exchanging`, which ends on every path, ending by `RequestClose()`. No frame is parsed.                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| The GOAWAY clauses state bytes no two sides write alike: "closed without a word before its preface" holds on Rust alone, "preface" means two things, the GOAWAY takes three shapes, and Kestrel ends a head never whole with `INTERNAL_ERROR` or a reset. | In part. 15.12 says a GOAWAY of `NO_ERROR` where its platform writes one (RFC 9113 §6.8), the socket closed within 2 s more, and never names the preface. Row "An idle socket's close" records h2's two steps, Node's and Kestrel's one GOAWAY of the last stream processed, hyper's silence before its handshake ends, and Kestrel's `INTERNAL_ERROR` or reset. The twins assert the end, never the bytes. TypeScript keeps one GOAWAY: a stream opened after it is never served on Node 24.9 and 26, nor on Kestrel (probed), so a client retries it as §6.8 allows.                                                                                                                                                                                                                                                            |
+| One knob for the head and the idle span pairs a slowloris bound with the keep-alive bound, which every platform keeps apart. C#'s idle close falls from 130 s to 30 s, under a load balancer's 60 s; TypeScript loses its documented `keepAliveTimeout`.  | In part. One bound stays, the user's choice. The transport sets `keepAliveTimeout`, `types.ts` says so, both old twins lose their platform keep-alive, and the CHANGELOG marks the change breaking. A "Leveled down" row, "One bound for a head and an idle span", names hyper's one timer as what forces it and a head timer of the Rust side's own as what lifts it. A bound of its own for the idle span, as Go's `IdleTimeout` and Envoy's `idle_timeout`, is ahead, by a round of its own, on every side at once.                                                                                                                                                                                                                                                                                                            |
+| On Rust, the idle span and the next head share one timer, so a head begun late gets only the rest of T, where Node and Kestrel give it a whole T from its first byte.                                                                                     | In part. 15.12 says a head's time counts from its first byte at the latest, which every side keeps, and row "An idle socket's close" says where each starts it. `answers 408 a head begun late in a kept-alive socket’s idle span that does not come whole within headers timeout` holds one on every side, its 408 within 5000 ms. Rust keeps hyper's timer: its deadline is armed once per idle span and cleared only at a parsed head (hyper 1.12.0 `conn.rs:222-283`), so a re-arm at the first byte is a head timer of its own, the lift of the "Leveled down" row.                                                                                                                                                                                                                                                          |
+| The gateway and the WebSocket servers hold heads as the HTTP transport does, and are left out.                                                                                                                                                            | Accepted. The bound holds at every socket a server reads heads on: the gateway's own listener (TypeScript: `keepAliveTimeout`, the session and handshake timers; C#: `KeepAliveTimeout`; Rust: the shared wire) and a WebSocket's address before its upgrade (TypeScript: `keepAliveTimeout`; C#: `KeepAliveTimeout`; Rust: its own read). Twins hold each: `closes a kept-alive socket idle past headers timeout at its own listener without another response`, `ends an HTTP/2 session at its own listener that reads no request’s head within headers timeout`, `closes a socket silent from its open at a WebSocket’s address past headers timeout` and `keeps an upgraded WebSocket silent past headers timeout`.                                                                                                            |
+| On Node 24, an `allowHTTP1` server has no `keepAliveTimeout`, so its idle HTTP/1.1 socket never closes; the fix holds only if the transport sets it without checking it exists.                                                                           | Accepted, and reproduced on 24.9.0, the engines floor. `boundHeadOf` sets `keepAliveTimeout` within its `headersTimeout` guard, which that server passes on both lines. `closes a kept-alive socket idle past headers timeout without another response` runs on it too. The row names Node's `Keep-Alive: timeout=N` and its close about 1 s past.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| Under TLS, a silent socket is bounded by the handshake's own timer, 120 s on TypeScript and 10 s on C#.                                                                                                                                                   | Accepted. C# sets `HandshakeTimeout` = `HeadersTimeout` (probed: closed at T). TypeScript times the handshake itself, from `'connection'` to `'secureConnection'`, on its platform clock, since `handshakeTimeout` is a creation option of the application's server. `closes a TLS socket whose handshake does not end within headers timeout without a word` holds it on every side.                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| The HTTP/1.1 idle close is one behaviour, so every side should play it from `spec/transports.json`.                                                                                                                                                       | Accepted. A case in clear, `headersTimeout` 1000: a connect that keeps its socket, its 201, then its end after 900 and within 5000 ms, nothing more written. Its connect writes no `connection: close`, and the case is played on the real clock. HTTP/2 and TLS stay with the twins.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| "A connection may stay idle" names a Bead connection, whose idle close is `inactivityTimeout`'s.                                                                                                                                                          | Accepted. The row says "an HTTP socket or HTTP/2 session", the CHANGELOG "an idle HTTP socket or HTTP/2 session", the matrix's row is "An idle socket's close", and 15.12 says such a close closes no Bead connection.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| Bead's C# client keeps idle pooled sockets 60 s, past every server's new bound.                                                                                                                                                                           | Accepted. The C# HTTP client and the gateway's caller set `PooledConnectionIdleTimeout` to 4 s, as the Rust side's pool and undici keep. TypeScript's undici takes 4 s, or a server's `Keep-Alive` hint less 2 s. Each stays under every server's bound at its default; a `headersTimeout` under 5 s races a pool that no hint tells, Kestrel and hyper sending none, which the CHANGELOG says. Rust's comment names the bound it stays under.                                                                                                                                                                                                                                                                                                                                                                                    |

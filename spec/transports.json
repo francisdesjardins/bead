@@ -7819,6 +7819,45 @@
       ]
     },
     {
+      "name": "an HTTP socket kept alive with no head and no answer under way closes past headersTimeout, nothing written",
+      "clauses": [
+        "15.12",
+        "15.12.14"
+      ],
+      "transport": "http",
+      "options": {
+        "headersTimeout": 1000
+      },
+      "realTime": true,
+      "steps": [
+        {
+          "send": {
+            "head": "POST /bead HTTP/1.1\r\nhost: {host}\r\ncontent-type: application/prs.bead\r\ncontent-length: 0\r\n\r\n"
+          },
+          "on": "idle"
+        },
+        {
+          "expect": {
+            "status": 201,
+            "fields": {
+              "bead-connection-token": {
+                "shape": "token"
+              }
+            }
+          },
+          "on": "idle"
+        },
+        {
+          "expect": {
+            "end": true
+          },
+          "on": "idle",
+          "after": 900,
+          "within": 5000
+        }
+      ]
+    },
+    {
       "name": "a DELETE ends its connection, and an exchange after it is refused 404",
       "clauses": [
         "15.4",
