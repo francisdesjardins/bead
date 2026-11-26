@@ -318,6 +318,10 @@ impl MemoryTransportServer {
             .map(|procedures| procedures_taken_of(procedures, "an in-memory transport server"))
             .transpose()?;
         let runtime = runtime_of(options.runtime.as_ref(), "an in-memory transport")?;
+        #[expect(
+            clippy::disallowed_methods,
+            reason = "where a stack starts: its platform's clock"
+        )]
         let clock: SharedClock = match &options.clock {
             Some(clock) => Arc::clone(clock),
             None => Arc::new(SystemClock::on(runtime.clone())),
@@ -995,6 +999,10 @@ impl MemoryTransportClient {
     /// A [`ProgrammerError`] outside a tokio runtime, or on one without its time driver.
     pub fn new(options: &MemoryTransportClientOptions) -> Result<Self, ProgrammerError> {
         let runtime = runtime_of(None, "an in-memory transport")?;
+        #[expect(
+            clippy::disallowed_methods,
+            reason = "where a stack starts: its platform's clock"
+        )]
         let clock: SharedClock = match &options.clock {
             Some(clock) => Arc::clone(clock),
             None => Arc::new(SystemClock::on(runtime.clone())),

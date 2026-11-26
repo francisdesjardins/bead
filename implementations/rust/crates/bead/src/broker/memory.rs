@@ -417,6 +417,10 @@ impl MemoryBroker {
         }
 
         let runtime = crate::platform::runtime_of(options.runtime.as_ref(), "an in-memory broker")?;
+        #[expect(
+            clippy::disallowed_methods,
+            reason = "where a stack starts: its platform's clock"
+        )]
         let clock: SharedClock = match &options.clock {
             Some(clock) => Arc::clone(clock),
             None => Arc::new(SystemClock::on(runtime.clone())),

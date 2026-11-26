@@ -2429,12 +2429,22 @@ impl BrokerParticipant {
     /// that delivers at most once where at least once is required, an inbox that takes a parcel
     /// under 1,024 bytes, a bound out of its range, outside a tokio runtime, given none, or on one
     /// without its time driver.
+    pub fn new(
+        adapter: Arc<dyn BrokerAdapter>,
+        options: &BrokerParticipantOptions,
+    ) -> Result<Self, ProgrammerError> {
+        Self::on_platform(adapter, None, options)
+    }
+
+    /// A participant over `adapter` whose timers that bound its connections, its heartbeat, run on
+    /// `platform`: the platform's clock when none, a test's otherwise.
     #[expect(
         clippy::too_many_lines,
         reason = "each option held and refused in the order the other sides hold them, then the participant built"
     )]
-    pub fn new(
+    pub(crate) fn on_platform(
         adapter: Arc<dyn BrokerAdapter>,
+        platform: Option<SharedClock>,
         options: &BrokerParticipantOptions,
     ) -> Result<Self, ProgrammerError> {
         let id = adapter.id().to_owned();
@@ -2507,7 +2517,12 @@ impl BrokerParticipant {
 
         let runtime =
             crate::platform::runtime_of(options.runtime.as_ref(), "a broker's participant")?;
-        let platform: SharedClock = Arc::new(SystemClock::on(runtime.clone()));
+        #[expect(
+            clippy::disallowed_methods,
+            reason = "where a stack starts: its platform's clock"
+        )]
+        let platform: SharedClock =
+            platform.unwrap_or_else(|| Arc::new(SystemClock::on(runtime.clone())));
         let clock = options
             .clock
             .clone()

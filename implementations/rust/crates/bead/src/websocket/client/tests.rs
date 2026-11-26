@@ -15,7 +15,7 @@ use tungstenite::protocol::Message;
 
 use super::*;
 use crate::testing::closed_port::{closed_port, started_alone_on};
-use crate::testing::{Instant, SteppingClock, patience, spawn, yield_now};
+use crate::testing::{Instant, SteppingClock, patience, platform_clock, spawn, yield_now};
 use crate::transport::TransportServerStartOptions;
 use crate::websocket::server::{WebSocketTransportServer, WebSocketTransportServerOptions};
 use crate::{ServerTransport, TransportServerAddress};
@@ -2086,7 +2086,7 @@ async fn connects_by_a_name_to_a_server_that_listens_on_one_loopback_family_alon
 // a client whose resolver answers 192.0.2.7 and records each name it is asked
 fn resolving_client(asked: &Arc<Mutex<Vec<String>>>) -> WebSocketTransportClient {
     let runtime = platform::socket_runtime_of(None, "a test's client").unwrap();
-    let platform: SharedClock = Arc::new(SystemClock::on(runtime.clone()));
+    let platform: SharedClock = Arc::new(platform_clock().unwrap());
 
     WebSocketTransportClient::resolving(
         (runtime, platform),

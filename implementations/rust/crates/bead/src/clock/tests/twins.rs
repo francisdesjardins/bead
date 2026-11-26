@@ -5,9 +5,9 @@ use core::task::Poll;
 use core::time::Duration;
 use std::sync::{Arc, Mutex};
 
-use crate::clock::{Clock, LayeredClocks, Schedule, SharedClock, SystemClock, clock_of};
+use crate::clock::{Clock, LayeredClocks, Schedule, SharedClock, clock_of};
 use crate::duration::LONGEST_TIMER;
-use crate::testing::{SteppingClock, instants};
+use crate::testing::{SteppingClock, instants, platform_clock};
 use crate::transport::{caught, caught_future};
 
 #[test]
@@ -82,7 +82,7 @@ async fn refuses_an_advance_within_another_and_takes_one_once_it_ends() {
 #[tokio::test]
 async fn describes_the_platform_s_clock_and_one_of_the_application_s_own() {
     let own = SteppingClock::new(instants::new_year());
-    let platform = SystemClock::current().expect("a platform clock");
+    let platform = platform_clock().expect("a platform clock");
     assert_eq!(own.description(), "one of its own");
     assert_eq!(platform.description(), "the platform's");
 }
@@ -92,7 +92,7 @@ async fn a_layer_runs_on_the_clock_of_the_one_beneath_it_unless_given_one_and_re
  {
     let beneath: SharedClock = SteppingClock::new(instants::new_year());
     let given: SharedClock = SteppingClock::new(instants::new_year());
-    let platform: SharedClock = Arc::new(SystemClock::current().expect("a platform clock"));
+    let platform: SharedClock = Arc::new(platform_clock().expect("a platform clock"));
     let layered = |(beneath, given): (Option<&SharedClock>, Option<&SharedClock>)| {
         clock_of(&LayeredClocks {
             beneath,
