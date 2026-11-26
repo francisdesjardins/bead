@@ -84,6 +84,7 @@ You work on Bead, at ${REPO}, on the branch \`${BRANCH}\`, checked out. You impl
 - Run a gate in the foreground, with a timeout that fits it (up to ten minutes); a run in the background only beside another you run at once, then one Monitor until-loop that waits on both, never sleeping and reading their output again and again.
 - Stop every process and watcher you started before you answer: a server, a broker's container, a browser, a Monitor; \`dotnet build-server shutdown\` after a C# build.
 - Parity: a test on one side has its twin on the other, named by the same sentence (\`Underscored_sentence\` in C#, \`snake_case_sentence\` in Rust); a difference that remains is a row of \`docs/support.md\` with the test that shows it.
+- A test that asserts something does not happen waits past the bound, the spec's window for its effect and every platform's granularity (Node's one-second check, Kestrel's heartbeat), so that it can fail on every side; a wait under one of them is a finding, raised in your report.
 ${args.notes ? `${args.notes}\n` : ''}`;
 
 const GENERATE = `regenerate every conformance file with \`${VENV}\` and each script of \`spec/generators/\` the README lists (never edit a generated file by hand)`;
