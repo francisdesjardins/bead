@@ -119,7 +119,8 @@ public sealed class HttpCaller : IDisposable
             throw new ArgumentOutOfRangeException(nameof(options), "maximumBodyBytes is a whole number above 0");
         }
 
-        var handler = _options.Handler ?? new SocketsHttpHandler { AllowAutoRedirect = false, UseCookies = false, ConnectCallback = HappyEyeballs.ConnectCallback, Proxy = LoopbackBypassProxy.Instance };
+        // its own handler lets a pooled connection go once idle 4 s; one the application gives stays its own
+        var handler = _options.Handler ?? new SocketsHttpHandler { AllowAutoRedirect = false, UseCookies = false, ConnectCallback = HappyEyeballs.ConnectCallback, Proxy = LoopbackBypassProxy.Instance, PooledConnectionIdleTimeout = HttpPool.IdleTimeout };
         HttpRedirects.AssertHandler(handler, nameof(options));
 
         _url = new UriBuilder(url) { Host = host }.Uri;

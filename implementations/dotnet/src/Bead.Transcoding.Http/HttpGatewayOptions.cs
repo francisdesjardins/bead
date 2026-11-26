@@ -214,7 +214,10 @@ public sealed record HttpGatewayOptions
 
     private readonly TimeSpan _headersTimeout = TimeSpan.FromSeconds(30);
 
-    /// <summary>How long a request's head may take to come whole (spec 15.12).</summary>
+    /// <summary>
+    /// How long a request's head may take to come whole, and a socket of its own listener may go
+    /// with no head and no answer under way, closed without a word past it (spec 15.12).
+    /// </summary>
     public TimeSpan HeadersTimeout
     {
         get

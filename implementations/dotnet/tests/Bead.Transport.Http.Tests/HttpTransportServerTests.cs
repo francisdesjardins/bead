@@ -89,6 +89,15 @@ public sealed partial class HttpTransportServerTests : IAsyncLifetime
 
     private static readonly Lazy<X509Certificate2> Certificate = new(CertificateOf);
 
+    // * an idle span's bound, as every side's timing twins hold it: no end before 900 ms of a
+    // HeadersTimeout of 1000 counted from where its count starts, and an end within 5000 ms, so a
+    // slow handshake on a CI runner stays far within it (spec 15.12)
+    private static readonly TimeSpan IdleBound = TimeSpan.FromSeconds(1);
+
+    private static readonly TimeSpan NoEndBefore = TimeSpan.FromMilliseconds(900);
+
+    private static readonly TimeSpan EndWithin = TimeSpan.FromMilliseconds(5000);
+
     // the addresses a server is secure on, the loopback's, and those it is not, the wildcards
     private static readonly string[] OnTheLoopbackOrNot = ["::1", "127.0.0.1", "127.0.0.2", "0.0.0.0", "::"];
 
@@ -528,10 +537,17 @@ public sealed partial class HttpTransportServerTests : IAsyncLifetime
         })];
     }
 
-    private async Task Start(HttpTransportServerOptions? options = null)
+    private Task Start(HttpTransportServerOptions? options = null)
+    {
+        return Start(options, null);
+    }
+
+    // a server of the options given on the tests' clock, each connection Kestrel takes through
+    // `connecting` when given
+    private async Task Start(HttpTransportServerOptions? options, Func<Microsoft.AspNetCore.Connections.ConnectionDelegate, Microsoft.AspNetCore.Connections.ConnectionDelegate>? connecting)
     {
         await _server.Stop().WaitAsync(Patience, Cancelled);
-        _server = new HttpTransportServer((options ?? new HttpTransportServerOptions()) with { Clock = _time });
+        _server = new HttpTransportServer((options ?? new HttpTransportServerOptions()) with { Clock = _time }) { Connecting = connecting };
         _server.Connection += (connectionHandle) =>
         {
             _connections.Enqueue(connectionHandle);
@@ -562,16 +578,19 @@ public sealed partial class HttpTransportServerTests : IAsyncLifetime
         public string? Wait { get; init; }
     }
 
-    /// <summary>A socket of the tests' own, writing HTTP/1.1 by hand: what HttpClient will not send.</summary>
+    /// <summary>
+    /// A socket of the tests' own, writing HTTP/1.1 by hand, in clear or under TLS: what HttpClient
+    /// will not send.
+    /// </summary>
     private sealed class Wire : IDisposable
     {
         private readonly TcpClient _tcp;
-        private readonly NetworkStream _stream;
+        private readonly Stream _stream;
 
-        private Wire(TcpClient tcp)
+        private Wire(TcpClient tcp, Stream stream)
         {
             _tcp = tcp;
-            _stream = tcp.GetStream();
+            _stream = stream;
         }
 
         // its own port, which the server sees as its peer's
@@ -591,7 +610,39 @@ public sealed partial class HttpTransportServerTests : IAsyncLifetime
             {
                 await tcp.ConnectAsync(IPAddress.Loopback, port, Cancelled);
 
-                return new Wire(tcp);
+                return new Wire(tcp, tcp.GetStream());
+            }
+            catch
+            {
+                tcp.Dispose();
+
+                throw;
+            }
+        }
+
+        // one under TLS, trusting the certificate given alone, HTTP/1.1 chosen by ALPN
+        public static async Task<Wire> OpenSecure(int port, X509Certificate2 certificate)
+        {
+            var tcp = new TcpClient();
+
+            try
+            {
+                await tcp.ConnectAsync(IPAddress.Loopback, port, Cancelled);
+
+                var tls = new SslStream(tcp.GetStream());
+
+                await tls.AuthenticateAsClientAsync(new SslClientAuthenticationOptions
+                {
+                    TargetHost = Host,
+                    ApplicationProtocols = [SslApplicationProtocol.Http11],
+                    RemoteCertificateValidationCallback = (_, given, _, _) =>
+                    {
+                        return given is not null && given.GetCertHashString() == certificate.GetCertHashString();
+                    },
+                }, Cancelled);
+                Assert.Equal(SslApplicationProtocol.Http11, tls.NegotiatedApplicationProtocol);
+
+                return new Wire(tcp, tls);
             }
             catch
             {
@@ -2495,24 +2546,84 @@ public sealed partial class HttpTransportServerTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task Closes_an_idle_kept_alive_socket_without_another_response()
+    public async Task Closes_a_kept_alive_socket_idle_past_headers_timeout_without_another_response()
     {
-        await using var server = new HttpTransportServer();
-
-        server.Built += (application) =>
+        // in clear, and under TLS over HTTP/1.1, no keep-alive of Kestrel's set by the test
+        foreach (var isSecure in new[] { false, true })
         {
-            Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions
-                .GetRequiredService<Microsoft.Extensions.Options.IOptions<Microsoft.AspNetCore.Server.Kestrel.Core.KestrelServerOptions>>(application.Services)
-                .Value.Limits.KeepAliveTimeout = TimeSpan.FromMilliseconds(100);
-        };
-        var port = (await server.Start(Loopback with { CancellationToken = Cancelled })).Port;
-        using var wire = await Wire.Open(port);
+            await Start(new HttpTransportServerOptions { HeadersTimeout = IdleBound, Certificate = isSecure ? Certificate.Value : null });
+            using var wire = isSecure ? await Wire.OpenSecure(_port, Certificate.Value) : await Wire.Open(_port);
+
+            await wire.Write($"POST /bead HTTP/1.1\r\nHost: {Host}\r\nContent-Type: {HttpTransport.MediaType}\r\nContent-Length: 0\r\n\r\n");
+            var (head, _) = await wire.Read();
+            var idle = Stopwatch.StartNew();
+
+            Assert.Equal(201, head.Status);
+
+            // nothing more read: its end past its time from its answer, and within 5 seconds of it
+            Assert.True(await wire.IsClosed(), $"secure: {isSecure}");
+            Assert.InRange(idle.Elapsed, NoEndBefore, EndWithin);
+        }
+    }
+
+    [Fact]
+    public async Task Closes_a_TLS_socket_whose_handshake_does_not_end_within_headers_timeout_without_a_word()
+    {
+        await Start(new HttpTransportServerOptions { HeadersTimeout = IdleBound, Certificate = Certificate.Value });
+        using var wire = await Wire.Open(_port);
+        var silent = Stopwatch.StartNew();
+
+        // no ClientHello written: nothing read, its end past its time from its open
+        Assert.True(await wire.IsClosed());
+        Assert.InRange(silent.Elapsed, NoEndBefore, EndWithin);
+        Assert.Empty(_connections);
+    }
+
+    [Fact]
+    public async Task Answers_408_a_head_begun_late_in_a_kept_alive_socket_s_idle_span_that_does_not_come_whole_within_headers_timeout()
+    {
+        await Start(new HttpTransportServerOptions { HeadersTimeout = IdleBound });
+        using var wire = await Wire.Open(_port);
 
         await wire.Write($"POST /bead HTTP/1.1\r\nHost: {Host}\r\nContent-Type: {HttpTransport.MediaType}\r\nContent-Length: 0\r\n\r\n");
-        var (head, _) = await wire.Read();
+        var (answered, _) = await wire.Read();
 
-        Assert.Equal(201, head.Status);
-        Assert.True(await wire.IsClosed());
+        Assert.Equal(201, answered.Status);
+
+        // * the next head's first byte 800 ms after its answer, then a byte each 300 ms: its time
+        // counts from that first byte at the latest, never the idle span's rest alone
+        await Task.Delay(TimeSpan.FromMilliseconds(800), Cancelled);
+        using var stop = CancellationTokenSource.CreateLinkedTokenSource(Cancelled);
+        var begun = Stopwatch.StartNew();
+        var dribbling = Dribbled(wire, (PostHead(answered.Headers[HttpTransport.ConnectionTokenHeader], "Content-Length: 0"), stop.Token));
+        var head = await wire.ReadHead();
+        var took = begun.Elapsed;
+
+        await stop.CancelAsync();
+        await dribbling;
+        Assert.Equal(408, head.Status);
+        Assert.InRange(took, TimeSpan.Zero, EndWithin);
+
+        // nothing handed on
+        Assert.Single(_connections);
+        Assert.Empty(_messages);
+    }
+
+    // a head written a byte each 300 ms, the first at once, until its socket ends or the test stops it
+    private static async Task Dribbled(Wire wire, (string Head, CancellationToken Token) dribble)
+    {
+        try
+        {
+            foreach (var octet in Encoding.ASCII.GetBytes(dribble.Head))
+            {
+                await wire.Write([octet]);
+                await Task.Delay(TimeSpan.FromMilliseconds(300), dribble.Token);
+            }
+        }
+        catch (Exception reason) when (reason is IOException or OperationCanceledException)
+        {
+            // its socket ended, or its 408 read
+        }
     }
 
     [Fact]
@@ -5657,13 +5768,18 @@ public sealed partial class HttpTransportServerTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task Sets_its_HeadersTimeout_and_no_body_rate_of_Kestrel_s_on_every_listener()
+    public async Task Sets_its_HeadersTimeout_its_KeepAliveTimeout_its_HandshakeTimeout_and_no_body_rate_of_Kestrel_s_on_every_listener()
     {
         var built = new List<Microsoft.AspNetCore.Builder.WebApplication>();
+        var handshakes = new List<TimeSpan>();
 
         await _server.Stop().WaitAsync(Patience, Cancelled);
-        _server = new HttpTransportServer(new HttpTransportServerOptions { HeadersTimeout = TimeSpan.FromSeconds(7) });
+        _server = new HttpTransportServer(new HttpTransportServerOptions { HeadersTimeout = TimeSpan.FromSeconds(7), Certificate = Certificate.Value });
         _server.Built += built.Add;
+        _server.Securing += (https) =>
+        {
+            handshakes.Add(https.HandshakeTimeout);
+        };
         await _server.Start(new TransportServerStartOptions { FindOpenPort = true, CancellationToken = Cancelled });
 
         await using var webSocket = new WebSockets.WebSocketTransportServer(new WebSockets.WebSocketTransportServerOptions { HeadersTimeout = TimeSpan.FromSeconds(9) });
@@ -5671,17 +5787,23 @@ public sealed partial class HttpTransportServerTests : IAsyncLifetime
         webSocket.Built += built.Add;
         await webSocket.Start(new TransportServerStartOptions { FindOpenPort = true, CancellationToken = Cancelled });
 
-        // every listener of each start, both loopbacks among them, by its one configuration
+        // every listener of each start, both loopbacks among them, by its one configuration, the
+        // HTTP transport's handshake on each of its own
         Assert.Equal(
-            [(TimeSpan.FromSeconds(7), true, true), (TimeSpan.FromSeconds(9), false, false)],
+            [(TimeSpan.FromSeconds(7), TimeSpan.FromSeconds(7), true, true), (TimeSpan.FromSeconds(9), TimeSpan.FromSeconds(9), false, false)],
             built.Select((application) =>
             {
                 var limits = Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions
                     .GetRequiredService<Microsoft.Extensions.Options.IOptions<Microsoft.AspNetCore.Server.Kestrel.Core.KestrelServerOptions>>(application.Services)
                     .Value.Limits;
 
-                return (limits.RequestHeadersTimeout, limits.MinRequestBodyDataRate is null, limits.MinResponseDataRate is null);
+                return (limits.RequestHeadersTimeout, limits.KeepAliveTimeout, limits.MinRequestBodyDataRate is null, limits.MinResponseDataRate is null);
             }));
+        Assert.NotEmpty(handshakes);
+        Assert.All(handshakes, (handshake) =>
+        {
+            Assert.Equal(TimeSpan.FromSeconds(7), handshake);
+        });
     }
 
     [Fact]

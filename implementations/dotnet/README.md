@@ -490,7 +490,11 @@ the listens, the outboxes and the server's life, under one lock on the C# side.
   its bytes at `MinimumSendBytesPerSecond` is lost, its connection dropped at both ends and
   reported through `Error` as its connection ends, naming the bound and its value, as an outbox past
   `MaximumOutboxBytes` is. A head is Kestrel's `RequestHeadersTimeout`, the transport's
-  `HeadersTimeout`, 30 s, on both transports, answered 408 as HTTP answers it. Every answer written
+  `HeadersTimeout`, 30 s, on both transports, answered 408 as HTTP answers it. Kestrel's
+  `KeepAliveTimeout` and, under TLS, its `HandshakeTimeout` are `HeadersTimeout` too: a socket with
+  no answer under way, or a handshake, that takes longer is closed without a word. An HTTP/2
+  session is timed by the transport, from its handshake's end and again from its last answer's
+  end, a PING moving nothing, and ended by a GOAWAY past `HeadersTimeout`. Every answer written
   before its body is whole closes its socket in stages (RFC 9112 §9.6): its end flushed, what still
   comes read and dropped until its client closes or 2 seconds pass, then its socket closed, so a
   reset never erases it. Kestrel's connection has no half-close, and a shutdown of its socket races

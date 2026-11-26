@@ -33,7 +33,10 @@ public sealed record HttpPolicy
     /// <summary>The bytes one request's body holds at most.</summary>
     public int? MaximumBodyBytes { get; private init; }
 
-    /// <summary>How long a request's head may take to come whole.</summary>
+    /// <summary>
+    /// How long a TLS handshake or a request's head may take to come whole, and a socket or an
+    /// HTTP/2 session may go with no head and no answer under way (spec 15.12).
+    /// </summary>
     public TimeSpan? HeadersTimeout { get; private init; }
 
     /// <summary>The slowest a request's body may come once its grace passed, in bytes a second; 0 holds none.</summary>
