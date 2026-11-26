@@ -7,7 +7,9 @@ import { setTimeout as sleep } from 'node:timers/promises';
 import { getCACertificates, setDefaultCACertificates } from 'node:tls';
 import { expect, test } from '@playwright/test';
 import { WebSocket as WsClient, type WebSocket as WsWebSocket, WebSocketServer } from 'ws';
+import { createRouterClient } from '../../../router/client/router-client';
 import { bytesOf } from '../../../router/shared/envelope';
+import { PLATFORM } from '../../shared/clock';
 import {
   CancelError,
   ConnectError,
@@ -43,7 +45,6 @@ import {
   reachedByLocalhost,
   sendRefusalOf,
   sockets,
-  spyTimeouts,
   startServer,
   stopServer,
   trapUncaught,
@@ -3094,15 +3095,22 @@ for (const [label, WebSocket] of IMPLEMENTATIONS) {
 }
 
 test('pings once silent for 30 seconds, waits 30 seconds and asks for the root over ws when told nothing', async () => {
-  using timeouts = spyTimeouts();
+  const platform = createTestClock();
   const { FakeWebSocket, sockets: made } = createFakeWebSocket({ canPing: true });
-  await using client = createWebSocketTransportClient({ WebSocket: FakeWebSocket });
+  await using client = createWebSocketTransportClient({
+    [PLATFORM]: platform,
+    WebSocket: FakeWebSocket,
+  });
   const connecting = client.connect({ host, port: 80 });
-  const before = timeouts.delays.length;
+  const before = platform.armed.length;
   made[0]?.fireOpen();
   await connecting;
 
-  expect(timeouts.delays.slice(before)).toEqual([30_000]);
+  expect(
+    platform.armed.slice(before).map(({ delay }) => {
+      return delay;
+    })
+  ).toEqual([30_000]);
   expect(CONNECT_DEFAULTS).toEqual({ pathname: '/', secured: false, timeout: 30_000 });
   expect(CLOSE_TIMEOUT).toBe(5_000);
   expect(MAXIMUM_MESSAGE_BYTES).toBe(16_778_240);
@@ -3862,8 +3870,14 @@ test.describe('WebSocketTransportClient, its close timeout', () => {
 
 test.describe('WebSocketTransportClient, heartbeat', () => {
   test('pings its server once silent for its heartbeat over a socket that can, and closes once its ping’s echo has not come within its heartbeat', async () => {
+    // * its heartbeat runs on its platform's clock, here a test's, stepped a heartbeat at a time
+    const platform = createTestClock();
     const { FakeWebSocket, sockets: made } = createFakeWebSocket({ canPing: true });
-    const client = createWebSocketTransportClient({ heartbeat: 20, WebSocket: FakeWebSocket });
+    const client = createWebSocketTransportClient({
+      [PLATFORM]: platform,
+      heartbeat: 20,
+      WebSocket: FakeWebSocket,
+    });
     const connecting = client.connect({ host, port: 80 });
     const socket = made[0];
     const closed = nextEvent(client, 'close');
@@ -3876,15 +3890,27 @@ test.describe('WebSocketTransportClient, heartbeat', () => {
     socket?.fireOpen();
     await connecting;
 
+    // four pings, a heartbeat apart, the fourth unanswered by the next
+    await platform.tickAsync(80);
+
+    expect([socket?.pings, socket?.wasTerminated]).toEqual([4, false]);
+
+    await platform.tickAsync(20);
+
     // dropped a heartbeat past the ping it left unanswered, as a network drops it
     expect(await closed).toEqual([false, false]);
     expect([socket?.pings, socket?.wasTerminated]).toEqual([4, true]);
-    expect(client.isClosed()).toBe(true);
+    expect([client.isClosed(), platform.countTimers()]).toEqual([true, 0]);
   });
 
   test('ends a connection whose heartbeat’s drop throws, telling what it threw once and its close', async () => {
+    const platform = createTestClock();
     const { FakeWebSocket, sockets: made } = createFakeWebSocket({ canPing: true });
-    const client = createWebSocketTransportClient({ heartbeat: 20, WebSocket: FakeWebSocket });
+    const client = createWebSocketTransportClient({
+      [PLATFORM]: platform,
+      heartbeat: 20,
+      WebSocket: FakeWebSocket,
+    });
     const connecting = client.connect({ host, port: 80 });
     const socket = made[0];
     const told: unknown[] = [];
@@ -3903,7 +3929,12 @@ test.describe('WebSocketTransportClient, heartbeat', () => {
 
     socket?.fireOpen();
     await connecting;
-    await nextEvent(client, 'close');
+
+    const closed = nextEvent(client, 'close');
+
+    // its ping a heartbeat in, unanswered, its drop a heartbeat after
+    await platform.tickAsync(40);
+    await closed;
 
     expect(socket?.wasTerminated).toBe(true);
     expect(told).toEqual([
@@ -3918,17 +3949,24 @@ test.describe('WebSocketTransportClient, heartbeat', () => {
   });
 
   test('pings once silent for HEARTBEAT when told nothing', async () => {
-    using timeouts = spyTimeouts();
+    const platform = createTestClock();
     const { FakeWebSocket, sockets: made } = createFakeWebSocket({ canPing: true });
-    const client = createWebSocketTransportClient({ WebSocket: FakeWebSocket });
+    const client = createWebSocketTransportClient({
+      [PLATFORM]: platform,
+      WebSocket: FakeWebSocket,
+    });
     const connecting = client.connect({ host, port: 80 });
     // what is armed once open, its connect's own timeout armed before
-    const before = timeouts.delays.length;
+    const before = platform.armed.length;
 
     made[0]?.fireOpen();
     await connecting;
 
-    expect(timeouts.delays.slice(before)).toEqual([HEARTBEAT]);
+    expect(
+      platform.armed.slice(before).map(({ delay }) => {
+        return delay;
+      })
+    ).toEqual([HEARTBEAT]);
     // asks for the root over ws within 30 seconds, and names no host nor port of its own
     expect(CONNECT_DEFAULTS).toEqual({ pathname: '/', secured: false, timeout: 30_000 });
 
@@ -3963,14 +4001,17 @@ test.describe('WebSocketTransportClient, heartbeat', () => {
   });
 
   test('stops beating once disconnected, dropped or closed by its server, and pings no socket that is closing', async () => {
+    // * the heartbeat runs on its stack's platform clock (decision 0011), here a test's, which
+    // moves as the test steps it, and no beat comes due as it sets up
+    const platform = createTestClock();
     const { FakeWebSocket, sockets: made } = createFakeWebSocket({ canPing: true });
-    const disconnected = createWebSocketTransportClient({
-      heartbeat: 20,
-      WebSocket: FakeWebSocket,
-    });
-    const dropped = createWebSocketTransportClient({ heartbeat: 20, WebSocket: FakeWebSocket });
-    const closing = createWebSocketTransportClient({ heartbeat: 20, WebSocket: FakeWebSocket });
-    const closed = createWebSocketTransportClient({ heartbeat: 20, WebSocket: FakeWebSocket });
+    const optionsOf = (): IWebSocketTransportClientOptions => {
+      return { [PLATFORM]: platform, heartbeat: 20, WebSocket: FakeWebSocket };
+    };
+    const disconnected = createWebSocketTransportClient(optionsOf());
+    const dropped = createWebSocketTransportClient(optionsOf());
+    const closing = createWebSocketTransportClient(optionsOf());
+    const closed = createWebSocketTransportClient(optionsOf());
 
     for (const [index, client] of [disconnected, dropped, closing, closed].entries()) {
       const connecting = client.connect({ host, port: 80 });
@@ -3979,6 +4020,9 @@ test.describe('WebSocketTransportClient, heartbeat', () => {
       await connecting;
     }
 
+    // each beating, on its own timer
+    expect(platform.countTimers()).toBe(4);
+
     await disconnected.disconnect();
     drop(dropped);
     made[3]?.fireClose({ code: 1001, reason: '' });
@@ -3986,11 +4030,11 @@ test.describe('WebSocketTransportClient, heartbeat', () => {
     // the server started its close handshake: no ping goes on it, and it is dropped all the same
     (made[2] as { readyState: number }).readyState = 2;
 
-    await expect
-      .poll(() => {
-        return made[2]?.wasTerminated;
-      })
-      .toBe(true);
+    // those that closed beat no more, their timers gone
+    expect(platform.countTimers()).toBe(1);
+
+    await platform.tickAsync(20);
+    await platform.tickAsync(20);
 
     // those that closed are never dropped, as a heartbeat still going would drop them
     expect(
@@ -4003,6 +4047,26 @@ test.describe('WebSocketTransportClient, heartbeat', () => {
       [0, true],
       [0, false],
     ]);
+    expect(platform.countTimers()).toBe(0);
+  });
+
+  test('runs on its platform’s clock when given none, and on a test’s once one replaces it', () => {
+    const platform = createTestClock();
+    const onItsPlatform = createWebSocketTransportClient();
+    const onATest = createWebSocketTransportClient({ [PLATFORM]: platform });
+
+    expect([onItsPlatform.clock === PLATFORM_CLOCK, onATest.clock === platform]).toEqual([
+      true,
+      true,
+    ]);
+    // * a replaced platform clock is one of its own, as any clock that is not the platform's
+    expect(() => {
+      createRouterClient(onATest, { clock: PLATFORM_CLOCK });
+    }).toThrow(
+      new ProgrammerError(
+        "a client's router runs on the clock of its transport, one of its own, and was given another, the platform's"
+      )
+    );
   });
 
   test('closes when its server leaves its pings unanswered, telling no error', async () => {
