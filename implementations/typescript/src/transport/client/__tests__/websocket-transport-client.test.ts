@@ -75,6 +75,7 @@ import {
   startDropping,
   startHeard,
   startPlatformProxy,
+  startedAloneOn,
   watchResolver,
   withoutUndici,
 } from '../../shared/__tests__/loopback-fixtures';
@@ -4189,7 +4190,8 @@ test.describe('WebSocketTransportClient, by a name', () => {
   test('connects by a name to a server that listens on one loopback family alone, whichever it is', async () => {
     for (const address of await reachedByLocalhost()) {
       const server = createWebSocketTransportServer({ WebSocketServer });
-      const { port } = await server.start({ address, findOpenPort: true });
+      await using held = await startedAloneOn(server, address);
+      const { port } = held;
 
       try {
         for (const [label, Tracked] of IMPLEMENTATIONS) {
