@@ -884,8 +884,10 @@ export const createRouterCore = <Handle extends string>(
         return;
       }
 
+      let settling: PromiseLike<unknown>;
+
       try {
-        resolver({
+        const returned: unknown = resolver({
           connectionHandle,
           header,
           // admitted already, before its payload was read: the resolver asks nothing again
@@ -893,19 +895,28 @@ export const createRouterCore = <Handle extends string>(
           payload,
           session,
           signal: controller.signal,
-        }).then(
-          () => {
-            answeringCalls.settle(controller);
-          },
-          (reason: unknown) => {
-            answeringCalls.settle(controller);
-            fail(reason);
-          }
-        );
+        });
+
+        settling = isThenable(returned)
+          ? returned
+          : Promise.reject(
+              new ProgrammerError(`a resolver gives a promise, not ${typeof returned}`)
+            );
       } catch (reason) {
-        answeringCalls.settle(controller);
-        fail(reason);
+        // * a throw as it is called fails as a rejection does, in a later turn, so failures are
+        // reported in the order they come (spec 9.5)
+        settling = Promise.reject(toError(reason));
       }
+
+      settling.then(
+        () => {
+          answeringCalls.settle(controller);
+        },
+        (reason: unknown) => {
+          answeringCalls.settle(controller);
+          fail(reason);
+        }
+      );
     });
   };
 

@@ -121,7 +121,10 @@ export interface IMqttBrokerAdapterOptions {
 export interface IMqttBrokerAdapter extends IBrokerAdapter {
   /** Whether its link is up: its CONNACK read, and neither stopped nor lost since. */
   readonly isLinked: boolean;
-  /** The messages it handed its participant at least once that are not acknowledged yet. */
+  /**
+   * The messages it handed its participant at least once that are not acknowledged yet. It falls
+   * as its acknowledgement goes: at the settle, which writes its PUBACK at once.
+   */
   readonly unsettled: number;
 }
 

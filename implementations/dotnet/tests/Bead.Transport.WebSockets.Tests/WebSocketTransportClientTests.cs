@@ -379,6 +379,38 @@ public sealed partial class WebSocketTransportClientTests : IAsyncLifetime
         return new TransportClientReconnectDelay(delay);
     }
 
+    // ! a bind of port 0 draws a port free on its own family only, which another test's listener may
+    // hold on the other loopback. A localhost name's connect tries the IPv4 one first and reaches
+    // that listener. The server starts on the loopback given, on a port drawn free on both, and the
+    // other loopback keeps that port held, bound and not listening, until disposed
+    private static async Task<ClosedPort> StartedAloneOn(WebSocketTransportServer server, string address)
+    {
+        var other = address == "::1" ? IPAddress.Loopback : IPAddress.IPv6Loopback;
+
+        for (var attempt = 0; ; attempt += 1)
+        {
+            var held = new ClosedPort(other);
+
+            try
+            {
+                await server.Start(new TransportServerStartOptions { Address = address, Port = held.Port, CancellationToken = Cancelled });
+
+                return held;
+            }
+            catch (Exception reason) when (Loopbacks.IsInUse(reason) && attempt < 64)
+            {
+                // taken on the loopback given: another draw
+                held.Dispose();
+            }
+            catch
+            {
+                held.Dispose();
+
+                throw;
+            }
+        }
+    }
+
     // each close the client raises, in order
     private static Channel<(bool WasClean, bool WasQuick)> ClosesOf(WebSocketTransportClient client)
     {
@@ -767,23 +799,39 @@ public sealed partial class WebSocketTransportClientTests : IAsyncLifetime
         }
     }
 
-    [Fact(Skip = "divergence: the credential provider runs synchronously before Connect returns")]
-    public async Task Defers_its_credential_provider_until_after_connect_returns()
+    // spec 15.2
+    [Fact]
+    public async Task Asks_its_credential_provider_outside_the_call_to_connect_before_the_connect_settles()
     {
-        var called = false;
-        var connecting = _client.Connect(Target with
-        {
-            CancellationToken = Cancelled,
-            CredentialProvider = (_) =>
-            {
-                called = true;
-                return ValueTask.FromResult(Bearer);
-            },
-        });
+        // whether the application's call to connect runs, as each ask of its provider saw it on its
+        // own thread
+        using var isCalling = new ThreadLocal<bool>();
+        var asked = new ConcurrentQueue<bool>();
+        Task connecting;
 
-        Assert.False(called);
+        isCalling.Value = true;
+        try
+        {
+            connecting = _client.Connect(Target with
+            {
+                CancellationToken = Cancelled,
+                CredentialProvider = (_) =>
+                {
+                    asked.Enqueue(isCalling.Value);
+
+                    return ValueTask.FromResult(Bearer);
+                },
+            });
+        }
+        finally
+        {
+            isCalling.Value = false;
+        }
+
         await connecting.WaitAsync(Patience, Cancelled);
-        Assert.True(called);
+
+        // read once the connect settled: a provider not asked yet would pass a read before it
+        Assert.Equal([false], asked);
         Assert.Equal(ReadyState.Open, _client.ReadyState);
     }
 
@@ -3438,13 +3486,14 @@ public sealed partial class WebSocketTransportClientTests : IAsyncLifetime
                     var closing = client.CloseConnection();
                     Assert.Equal(0x8, (await FrameFrom(stream))?.Opcode);
                     var more = FrameFrom(stream);
-                    await Task.Delay(1100, Cancelled);
 
-                    Assert.Equal(ReadyState.Closing, client.ReadyState);
-                    Assert.False(more.IsCompleted);
-                    await stream.WriteAsync(new byte[] { 0x88, 0x02, 0x03, 0xe8 }, Cancelled);
+                    // ! its close unanswered, a beat comes due and sends no ping, and the heartbeat
+                    // drops it all the same, from twice the heartbeat after the pong was read (spec
+                    // 15.3): no wait on the clock can tell it still closing. Its close is told as the
+                    // disconnect asked, and nothing goes after its close
+                    Assert.Equal((true, false), await Next(closes));
                     await closing.WaitAsync(Patience, Cancelled);
-                    Assert.Null(await more);
+                    Assert.Null(await more.WaitAsync(Patience, Cancelled));
                 }
                 else if (ending == "dispose")
                 {
@@ -4184,11 +4233,11 @@ public sealed partial class WebSocketTransportClientTests : IAsyncLifetime
         foreach (var address in Addresses.ReachedByLocalhost())
         {
             await using var server = new WebSocketTransportServer();
-            var port = (await server.Start(new TransportServerStartOptions { Address = address, FindOpenPort = true, CancellationToken = Cancelled })).Port;
+            using var held = await StartedAloneOn(server, address);
             await using var client = new WebSocketTransportClient();
             var started = TimeProvider.System.GetTimestamp();
 
-            await client.Connect(new WebSocketTransportClientConnectOptions { Host = "localhost", Port = port, CancellationToken = Cancelled }).WaitAsync(Patience, Cancelled);
+            await client.Connect(new WebSocketTransportClientConnectOptions { Host = "localhost", Port = held.Port, CancellationToken = Cancelled }).WaitAsync(Patience, Cancelled);
             connects.Add((address, TimeProvider.System.GetElapsedTime(started)));
             Assert.Equal((address, ReadyState.Open), (address, client.ReadyState));
         }

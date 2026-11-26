@@ -76,7 +76,13 @@ public sealed class HttpGateway : IAsyncDisposable
     private int _calls;
     private int _streams;
     private long _bodyBytes;
+
+    // where it listens, under a lock of its own: its listener, the start that binds one, settled
+    // once that start ends, and whether it was disposed
+    private readonly Lock _listening = new();
     private WebApplication? _application;
+    private TaskCompletionSource? _starting;
+    private bool _isDisposed;
 
     /// <summary>
     /// A gateway, not yet listening, its options held: an entry of its hosts, origins or proxies none
@@ -186,49 +192,123 @@ public sealed class HttpGateway : IAsyncDisposable
     // durations' harness reads back
     internal TimeSpan Timeout { get; }
 
+    // what a start awaits before it binds: the tests' way to hold a start as it binds
+    internal Func<Task>? Binding { get; set; }
+
     /// <summary>
     /// Starts its own listener, as an HTTP transport builds its own, and gives where it listens: an IP
-    /// literal, or <c>localhost</c>, both loopbacks.
+    /// literal, or <c>localhost</c>, both loopbacks. Judged in this order: once disposed, an
+    /// <see cref="ObjectDisposedException"/>; an address off those, an <see cref="ArgumentException"/>;
+    /// while it listens, or a start binds, an <see cref="InvalidOperationException"/>, as a gateway
+    /// listens once. A stop or a dispose that comes as it binds waits for it.
     /// </summary>
     public async Task<TransportServerAddress> Start(HttpGatewayStartOptions? options = null)
     {
         var start = options ?? new HttpGatewayStartOptions();
         var cancellationToken = start.CancellationToken;
+        var starting = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
 
-        HostsAndOrigins.AssertAddress(start.Address, nameof(HttpGatewayStartOptions.Address));
-
-        if (_application is not null)
+        lock (_listening)
         {
-            throw new InvalidOperationException("a gateway listens once");
+            if (_isDisposed)
+            {
+                throw new ObjectDisposedException(null, "the gateway is disposed");
+            }
+
+            HostsAndOrigins.AssertAddress(start.Address, nameof(HttpGatewayStartOptions.Address));
+
+            if (_application is not null || _starting is not null)
+            {
+                throw new InvalidOperationException("a gateway listens once");
+            }
+
+            _starting = starting;
         }
 
-        var ((application, port), address) = start.Address == Loopbacks.Localhost
-            ? await Loopbacks.Bind(
-                (listening) =>
-                {
-                    return Serving(listening, cancellationToken);
-                },
-                new LoopbackBinding { Port = start.Port, FindOpenPort = start.FindOpenPort })
-            : (await Serving(([IPAddress.Parse(start.Address)], start.FindOpenPort ? 0 : start.Port), cancellationToken), start.Address);
+        try
+        {
+            if (Binding is { } binding)
+            {
+                await binding();
+            }
 
-        _application = application;
+            var ((application, port), address) = start.Address == Loopbacks.Localhost
+                ? await Loopbacks.Bind(
+                    (listening) =>
+                    {
+                        return Serving(listening, cancellationToken);
+                    },
+                    new LoopbackBinding { Port = start.Port, FindOpenPort = start.FindOpenPort })
+                : (await Serving(([IPAddress.Parse(start.Address)], start.FindOpenPort ? 0 : start.Port), cancellationToken), start.Address);
 
-        return new TransportServerAddress(address, port);
+            lock (_listening)
+            {
+                _application = application;
+                _starting = null;
+            }
+
+            return new TransportServerAddress(address, port);
+        }
+        catch
+        {
+            // a bind that failed leaves nothing to stop, and a start after it binds anew
+            lock (_listening)
+            {
+                _starting = null;
+            }
+
+            throw;
+        }
+        finally
+        {
+            // ! settled once its listener is kept, or its failure cleared: a stop that waited on it
+            // then finds what it bound
+            starting.TrySetResult();
+        }
     }
 
-    /// <summary>Stops its own listener, each exchange under way closed with it; it settles at once when it listens on none.</summary>
+    /// <summary>
+    /// Stops its own listener, each exchange under way closed with it, once a start that binds settled;
+    /// it settles at once when it listens on none and none binds.
+    /// </summary>
     public async Task Stop()
     {
-        if (Interlocked.Exchange(ref _application, null) is { } application)
+        Task? starting;
+
+        lock (_listening)
+        {
+            starting = _starting?.Task;
+        }
+
+        // * a start under way gives its address, then its listener stops here; its outcome is its own
+        if (starting is not null)
+        {
+            await starting;
+        }
+
+        WebApplication? application;
+
+        lock (_listening)
+        {
+            application = _application;
+            _application = null;
+        }
+
+        if (application is not null)
         {
             await application.StopAsync();
             await application.DisposeAsync();
         }
     }
 
-    /// <inheritdoc/>
+    /// <summary>Stops it, as <see cref="Stop"/>, and ends it for good: a start after it is an <see cref="ObjectDisposedException"/>.</summary>
     public async ValueTask DisposeAsync()
     {
+        lock (_listening)
+        {
+            _isDisposed = true;
+        }
+
         await Stop();
     }
 

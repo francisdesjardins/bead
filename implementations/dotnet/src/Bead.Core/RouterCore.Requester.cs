@@ -446,7 +446,19 @@ internal sealed partial class RouterCore
             var call = new CallAddress(callId, request.ConnectionHandle);
 
             _pendingCalls.Add(call, pendingRequest);
-            request.OnCallId?.Invoke(callId);
+
+            try
+            {
+                request.OnCallId?.Invoke(callId);
+            }
+            catch (Exception reason)
+            {
+                // a hook that throws fails its own call: nothing of it went, and nothing of it is kept
+                _pendingCalls.Forget(call, pendingRequest);
+                counted?.End(StartedCall.EndingOf(reason));
+
+                throw;
+            }
 
             // a request that goes whole waits on its timeout; one that goes as a transfer, on its
             // inactivity while it goes, which sending it arms
@@ -501,10 +513,20 @@ internal sealed partial class RouterCore
         {
             var (call, pendingRequest) = waiting;
 
+            // the transport has it: its hook told so; one that throws ends the call as its timer would,
+            // the peer told to cancel it, and fails it with that throw
             void HandedOff()
             {
                 pendingRequest.IsSent = true;
-                pendingRequest.OnSent?.Invoke(true);
+
+                try
+                {
+                    pendingRequest.OnSent?.Invoke(true);
+                }
+                catch (Exception thrown)
+                {
+                    EndPending(thrown, (call, pendingRequest));
+                }
             }
 
             try
@@ -518,10 +540,18 @@ internal sealed partial class RouterCore
             }
             catch (Exception reason)
             {
-                // handed over, then refused by the transport: nothing of it went out
-                if (pendingRequest.IsSent)
+                // handed over, then refused by the transport: nothing of it went out. Its hook is told
+                // so only while its call still waits, and a throw of it is the call's failure
+                if (pendingRequest.IsSent && ReferenceEquals(_pendingCalls.Get(call), pendingRequest))
                 {
-                    pendingRequest.OnSent?.Invoke(false);
+                    try
+                    {
+                        pendingRequest.OnSent?.Invoke(false);
+                    }
+                    catch (Exception thrown)
+                    {
+                        reason = thrown;
+                    }
                 }
 
                 // ! a dispose that closed the transport under it rejects it as disposed, as its rejection

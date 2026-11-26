@@ -63,6 +63,7 @@ import {
   startDropping,
   startHeard,
   startPlatformProxy,
+  startedAloneOn,
   watchResolver,
   withoutUndici,
 } from '../../shared/__tests__/loopback-fixtures';
@@ -3665,7 +3666,8 @@ test.describe('createHTTPTransportClient, by a name', () => {
           return createServer(listener);
         },
       });
-      const { port } = await server.start({ address, findOpenPort: true });
+      await using held = await startedAloneOn(server, address);
+      const { port } = held;
       const client = createHTTPTransportClient({ isListening: false });
 
       try {

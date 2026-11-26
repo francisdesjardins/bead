@@ -199,7 +199,10 @@ public sealed class MqttBrokerAdapter : IBrokerAdapter, IAsyncDisposable
         }
     }
 
-    /// <summary>The messages it handed its participant at least once that are not acknowledged yet.</summary>
+    /// <summary>
+    /// The messages it handed its participant at least once that are not acknowledged yet. It falls as
+    /// its acknowledgement goes: at the settle, which writes its PUBACK at once.
+    /// </summary>
     public int Unsettled
     {
         get

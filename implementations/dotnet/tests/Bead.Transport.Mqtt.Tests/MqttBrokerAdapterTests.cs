@@ -2723,6 +2723,49 @@ public sealed class MqttBrokerAdapterTests : IAsyncLifetime
         Assert.False(adapter.IsLinked);
     }
 
+    // spec 15.26
+    [Fact]
+    public async Task Asks_its_password_provider_outside_the_call_to_start_before_the_start_settles()
+    {
+        // whether the application's call to start runs, as each ask of its provider saw it on its own
+        // thread
+        using var isCalling = new ThreadLocal<bool>();
+        var asked = new ConcurrentQueue<bool>();
+        await using var adapter = AdapterOf((options) =>
+        {
+            return options with
+            {
+                Password = null,
+                PasswordProvider = (_) =>
+                {
+                    asked.Enqueue(isCalling.Value);
+
+                    return ValueTask.FromResult(Password);
+                },
+            };
+        });
+        Task starting;
+
+        isCalling.Value = true;
+        try
+        {
+            starting = adapter.Start();
+        }
+        finally
+        {
+            isCalling.Value = false;
+        }
+
+        var link = await _script.Link();
+
+        await link.Send(ScriptedLink.ConnAck());
+        await starting.WaitAsync(Patience, Cancelled);
+
+        // read once the start settled: a provider not asked yet would pass a read before it
+        Assert.Equal([false], asked);
+        await adapter.Stop();
+    }
+
     [Fact]
     public async Task Fails_its_start_once_its_password_provider_outlives_its_connect_timeout_and_takes_no_late_answer()
     {
@@ -3343,9 +3386,11 @@ public sealed class MqttBrokerAdapterTests : IAsyncLifetime
             var parcel = BrokerParcels.Write(new BrokerParcel { Kind = BrokerParcelKinds.Reset, Opener = 0x0102030405060708, Acceptor = 0x0807060504030201 });
 
             Assert.Equal(BrokerPublished.Taken, await adapter.Publish(new BrokerPublication { Topic = inbox, Payload = parcel, ExpiresAfter = TimeSpan.FromSeconds(5) }).WaitAsync(Patience, Cancelled));
+
+            // * its PUBACK gone: a count read in its settle's own turn differs by side (docs/support.md)
             await Until(() =>
             {
-                return !kinds.IsEmpty;
+                return !kinds.IsEmpty && adapter.Unsettled == 0;
             });
             Assert.Equal([BrokerParcels.KindNamed(BrokerParcelKinds.Reset)], kinds);
             Assert.Equal(0, adapter.Unsettled);

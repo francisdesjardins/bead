@@ -875,10 +875,55 @@ public sealed partial class HttpTransportServerTests : IAsyncLifetime
         }
     }
 
+    // ! ports below every system's ephemeral range (RFC 6335 §6), which no bind of port 0 is given: a
+    // test that probes the IPv4 loopback on a port it drew draws it here, or another test's bind of
+    // port 0 may take that port on IPv4 meanwhile
+    private const int NonEphemeralPorts = 20_000;
+    private const int NonEphemeralPortsCount = 10_000;
+
+    // a port below the ephemeral range free on both loopbacks as it is drawn, let go at once
+    private static int DrawnNonEphemeral()
+    {
+        for (var attempt = 0; ; attempt += 1)
+        {
+            var port = NonEphemeralPorts + Random.Shared.Next(NonEphemeralPortsCount);
+
+            try
+            {
+                using var v4 = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
+                using var v6 = new Socket(AddressFamily.InterNetworkV6, SocketType.Stream, ProtocolType.Tcp) { DualMode = false };
+
+                v4.Bind(new IPEndPoint(IPAddress.Loopback, port));
+                v6.Bind(new IPEndPoint(IPAddress.IPv6Loopback, port));
+
+                return port;
+            }
+            catch (SocketException) when (attempt < 64)
+            {
+                // taken on one loopback or the other: another draw
+            }
+        }
+    }
+
     // a socket of another process's on the IPv6 loopback, IPv6 alone, listening on the port given,
-    // any free one for 0
+    // for 0 one below the ephemeral range free on both loopbacks
     private static Socket HeldOnIPv6(int port)
     {
+        if (port == 0)
+        {
+            for (var attempt = 0; ; attempt += 1)
+            {
+                try
+                {
+                    return HeldOnIPv6(DrawnNonEphemeral());
+                }
+                catch (SocketException) when (attempt < 64)
+                {
+                    // taken between its draw and its hold: another draw
+                }
+            }
+        }
+
         var socket = new Socket(AddressFamily.InterNetworkV6, SocketType.Stream, ProtocolType.Tcp) { DualMode = false };
 
         try
@@ -3869,7 +3914,7 @@ public sealed partial class HttpTransportServerTests : IAsyncLifetime
             {
                 DrawPort = () =>
                 {
-                    drawn.Add(drawn.Count == 0 ? held : Loopbacks.DrawPort());
+                    drawn.Add(drawn.Count == 0 ? held : DrawnNonEphemeral());
 
                     return drawn[^1];
                 },
@@ -4480,7 +4525,7 @@ public sealed partial class HttpTransportServerTests : IAsyncLifetime
     // an answer between a request's body read whole and its hand-on, on another thread, which the
     // TypeScript side's one turn leaves no room for: written, its request never handed on
     [Fact]
-    public async Task Answers_a_request_an_answer_comes_for_between_its_body_s_end_and_its_hand_on_never_handing_it_on()
+    public async Task Answers_a_request_an_answer_comes_for_from_another_thread_between_its_body_s_end_and_its_hand_on_never_handing_it_on()
     {
         await Start();
 
@@ -4501,6 +4546,40 @@ public sealed partial class HttpTransportServerTests : IAsyncLifetime
         Assert.Equal(200, (int)answered.StatusCode);
         Assert.Equal(result, await BytesOf(answered));
         await sent!.WaitAsync(Patience, Cancelled);
+        Assert.Empty(_messages);
+        Assert.Equal(0L, Count("waitingExchanges"));
+    }
+
+    // spec 15.12
+    [Fact]
+    public async Task Answers_a_request_an_answer_comes_for_between_its_body_s_end_and_its_hand_on_never_handing_it_on()
+    {
+        await Start();
+
+        var (connectionToken, connectionHandle) = await Connect();
+        var result = EnvelopeOf(EnvelopeKind.Result, (1, 4));
+
+        // its body read whole, held at its connection's gate
+        _server.Pause(connectionHandle);
+
+        var asking = Fetch(PostOf(connectionToken, EnvelopeOf(EnvelopeKind.Request, 1)));
+
+        await Until(() =>
+        {
+            return _server.HeldOf(connectionHandle) == 1 && Count("waitingExchanges") == 1;
+        });
+        await _server.Send(new TransportMessage(result, false), connectionHandle).WaitAsync(Patience, Cancelled);
+
+        using var answered = await asking.WaitAsync(Patience, Cancelled);
+
+        // * answered as it waited
+        Assert.Equal(200, (int)answered.StatusCode);
+        Assert.Equal(result, await BytesOf(answered));
+
+        _server.Resume(connectionHandle);
+        await Task.Delay(TimeSpan.FromMilliseconds(50), Cancelled);
+
+        // * never handed on
         Assert.Empty(_messages);
         Assert.Equal(0L, Count("waitingExchanges"));
     }

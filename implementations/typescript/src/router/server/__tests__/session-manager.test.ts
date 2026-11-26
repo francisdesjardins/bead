@@ -923,6 +923,30 @@ test.describe('createSessionManager', () => {
       expect(connectionReached).toHaveLength(1);
     });
 
+    // one thread never runs a timer it cleared, so this twin holds the order alone, not a race: the
+    // touch's timer is the one that counts
+    test('a session’s timer that fired behind the touch that restarted it reaches nothing', () => {
+      const clock = createTestClock(Date.UTC(2026, 0, 1));
+      using sessions = createSessionManager<IUser>({ clock });
+      const sessionReached = record(sessions, 'sessionInactivityTimeoutReached');
+
+      sessions.set({ ...sessions.create(first), sessionInactivityTimeout: 1_000 });
+      clock.tick(500);
+
+      expect(sessions.touch(first)).toBe(true);
+      clock.tick(600);
+
+      // past the first timer's due, which the touch replaced
+      expect(sessionReached).toEqual([]);
+      clock.tick(400);
+
+      // the timer the touch armed, once
+      expect(sessionReached).toHaveLength(1);
+      clock.runAll();
+
+      expect(sessionReached).toHaveLength(1);
+    });
+
     test('activity within the same millisecond restarts both timers, and emits nothing', () => {
       const clock = createTestClock(Date.UTC(2026, 0, 1));
       using sessions = createSessionManager<IUser>({ clock });

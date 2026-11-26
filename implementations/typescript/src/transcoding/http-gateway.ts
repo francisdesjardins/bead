@@ -37,6 +37,7 @@ import {
   toError,
 } from '../transport/shared/errors';
 import { HEARTBEAT } from '../transport/shared/heartbeat';
+import { noop } from '../transport/shared/noop';
 import type { EmitterListener, IMemoryTransportServerLike } from '../transport/shared/types';
 import {
   assertHosts,
@@ -218,10 +219,14 @@ export interface IHTTPGateway extends AsyncDisposable {
   ) => void;
   /**
    * Listens on its own listener, built by `createServer`, once until it stops, and gives where: its
-   * address, `localhost` where both loopbacks took it, and its port.
+   * address, `localhost` where both loopbacks took it, and its port. Refused once disposed, then
+   * for its address, then while it listens or binds.
    */
   start: (options?: IHTTPGatewayStartOptions) => Promise<{ address: string; port: number }>;
-  /** Closes its listener, and ends every exchange under way, each connection closed. */
+  /**
+   * Closes its listener, and ends every exchange under way, each connection closed; a start that
+   * binds gives its address first, and nothing listens once it settles.
+   */
   stop: () => Promise<void>;
 }
 
@@ -2028,6 +2033,9 @@ export const createHTTPGateway = (given: IHTTPGatewayOptions): IHTTPGateway => {
   const listening = new Set<IHTTPServerLike>();
   // whether a start holds its listeners, until a stop lets them go
   let isListening = false;
+  // the start that binds, which a stop waits for; and whether a dispose ended the gateway for good
+  let starting: Promise<unknown> | undefined;
+  let isDisposed = false;
 
   return {
     listener,
@@ -2041,6 +2049,11 @@ export const createHTTPGateway = (given: IHTTPGatewayOptions): IHTTPGateway => {
     },
 
     start: async ({ address = LOCALHOST, port = 0 } = {}) => {
+      // * judged in this order: its disposal, its address, then whether it listens
+      if (isDisposed) {
+        throw new ProgrammerError('the gateway is disposed');
+      }
+
       if (createServer === undefined) {
         throw new ProgrammerError(
           'a gateway built with no createServer listens on none of its own'
@@ -2092,17 +2105,31 @@ export const createHTTPGateway = (given: IHTTPGatewayOptions): IHTTPGateway => {
         });
       };
 
+      const binding = listenOn(bind, { address, findOpenPort: false, port });
+
+      starting = binding;
+
       try {
-        return await listenOn(bind, { address, findOpenPort: false, port });
+        return await binding;
       } catch (reason) {
         // * a listen that failed listens on none, and may be tried again
         isListening = false;
 
         throw reason;
+      } finally {
+        if (starting === binding) {
+          starting = undefined;
+        }
       }
     },
 
     stop: async () => {
+      // ! a start that binds gives its address first, whatever its outcome: what it bound is let go
+      // here, and nothing listens once the stop settles
+      if (starting !== undefined) {
+        await starting.then(noop, noop);
+      }
+
       isListening = false;
 
       for (const end of live) {
@@ -2124,6 +2151,8 @@ export const createHTTPGateway = (given: IHTTPGatewayOptions): IHTTPGateway => {
     },
 
     [Symbol.asyncDispose]() {
+      isDisposed = true;
+
       return this.stop();
     },
   };

@@ -1711,7 +1711,11 @@ test('reads raw event data in standard padded base64 alone and bounds each event
       'an HTTP raw event holds standard padded base64',
       1,
     ],
-    ['event: result\ndata: "%%"\n\n', 'the HTTP payload cannot be decoded', 0],
+    ['event: result\ndata: "%%"\n\n', 'an HTTP raw event holds standard padded base64', 0],
+    ['event: result\ndata: "AAF="\n\n', 'an HTTP raw event holds standard padded base64', 0],
+    ['event: result\ndata: "A AE="\n\n', 'an HTTP raw event holds standard padded base64', 0],
+    ['event: result\ndata: "AA-_"\n\n', 'an HTTP raw event holds standard padded base64', 0],
+    ['event: result\ndata: null\n\n', 'an HTTP text or raw event holds a JSON string', 0],
     [
       'event: result\ndata: "AAE="\n\ndata: "0123456789012345678901234567"\n\n',
       'the HTTP event passes maximumBodyBytes',

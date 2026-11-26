@@ -49,6 +49,14 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   - a name under `.localhost.` at every server;
   - a field with no auth-scheme at the gateway;
   - what a WebSocket server reports as it fails a connection.
+- On the TypeScript side, a resolver's synchronous throw is reported as a later failure is, so the
+  failures of resolvers are reported in the order they come, as on the other sides.
+- The TypeScript and C# WebSocket servers fail a 64-bit length with its top bit set at that length's
+  first byte, with 1002.
+- The C# WebSocket client, and the C# MQTT 5 and AMQP 1.0 adapters, ask their provider outside the
+  call to `Connect` or `Start`.
+- An HTTP caller gives one detail for raw event data that is not standard padded base64, on every
+  side: `an HTTP raw event holds standard padded base64`.
 
 ### Fixed
 
@@ -56,6 +64,19 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   message of 64 KiB allocated about two-thirds more than in 0.16.0. It now gathers such a message
   in a buffer rented from the shared pool, given back once the message is whole, and copies a
   message of one read straight.
+- A hook that throws as it is told a call's hand-off fails that call alone, on every side. The call
+  is cancelled once its request went, and its hook is told nothing more. On the TypeScript side the
+  throw is no longer left unhandled. On the C# side the call no longer waits out its timeout, and a
+  call-id hook's throw no longer holds the call's id.
+- On the C# side, a session timer that a touch replaced no longer ends the session.
+- A C# in-memory connect hands on what its server sent as it drew the connection before the connect
+  settles, so a reconnection that its message listener cancels is cancelled, as on the other sides.
+- A TypeScript HTTP server no longer hands on a request it held for a paused connection once an
+  answer ended its exchange. A C# HTTP server writes that answer as it comes, not once the
+  connection resumes.
+- The HTTP gateway refuses a start after its dispose (`the gateway is disposed`) on every side. A stop
+  or a dispose that overtakes a start leaves nothing listening. On the C# side, two starts at once no
+  longer both listen.
 
 ## [0.17.0] - 2026-11-24
 

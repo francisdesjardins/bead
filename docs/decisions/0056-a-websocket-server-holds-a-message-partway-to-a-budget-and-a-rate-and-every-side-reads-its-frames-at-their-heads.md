@@ -130,7 +130,8 @@ lengths their heads announce. Each verdict is judged at the byte that draws it (
 - **1002**, at a head that breaks §5.2, §5.4 or §5.5: a reserved bit set, since no extension is
   negotiated (spec 15.2); an opcode of 3 to 7 or 11 to 15; a control frame not final or longer than
   125; a continuation with no message under way; a data frame other than a continuation while a
-  message is under way; a 64-bit length with its top bit set; and an unmasked frame on a server, a
+  message is under way; a 64-bit length with its top bit set, at that length's first byte; and an
+  unmasked frame on a server, a
   masked one on a client. A data frame's length not in its minimal form is taken, as `ws`, .NET and
   tungstenite take it. A control frame's is judged in its 7 bits, as `ws` judges it, so one whose
   length takes a longer form fails with 1002 whatever its value: §5.2 asks the minimal form, and

@@ -802,6 +802,111 @@ async fn listens_once_until_it_stops_and_never_once_disposed() {
     fixture.server.dispose().await.expect("the server disposed");
 }
 
+// whether nothing listens on `port`: it binds again
+fn listens_on_none(port: u16) -> bool {
+    std::net::TcpListener::bind((HOST, port)).is_ok()
+}
+
+// a start binds as it is made: one its stop or its dispose overtakes before it is awaited gives its
+// address, and nothing listens there once that stop or that dispose settles
+#[tokio::test]
+async fn settles_a_start_its_stop_or_its_dispose_overtook_with_its_address_and_listens_on_none_once_that_settles()
+ {
+    for is_disposing in [false, true] {
+        let fixture = Fixture::new(|_| {}, false).await;
+        let starting = fixture.gateway.start(&HttpGatewayStartOptions {
+            address: Some(HOST.to_owned()),
+            find_open_port: Some(true),
+            ..HttpGatewayStartOptions::default()
+        });
+        let ending = if is_disposing {
+            fixture.gateway.dispose()
+        } else {
+            fixture.gateway.stop()
+        };
+        let port = starting.await.expect("its address").port;
+
+        ending.await.expect("ended");
+        assert!(port > 0, "disposing {is_disposing}: its port");
+        assert!(
+            listens_on_none(port),
+            "disposing {is_disposing}: nothing listens"
+        );
+        fixture.stop().await;
+    }
+}
+
+#[tokio::test]
+async fn refuses_a_second_start_while_its_first_binds_a_gateway_listens_once() {
+    let fixture = Fixture::new(|_| {}, false).await;
+    let start = HttpGatewayStartOptions {
+        address: Some(HOST.to_owned()),
+        find_open_port: Some(true),
+        ..HttpGatewayStartOptions::default()
+    };
+    let starting = fixture.gateway.start(&start);
+
+    assert_eq!(
+        fixture
+            .gateway
+            .start(&start)
+            .await
+            .expect_err("a second start")
+            .to_string(),
+        "a gateway listens once"
+    );
+
+    let port = starting.await.expect("its address").port;
+
+    assert_eq!(
+        raw_answer_of(
+            port,
+            head_of(("GET", "/openapi.json"), (port, &[])).as_bytes()
+        )
+        .await
+        .status,
+        200,
+        "the first listens"
+    );
+    fixture.stop().await;
+}
+
+#[tokio::test]
+async fn judges_a_start_s_disposal_then_its_address_then_whether_it_listens() {
+    let fixture = Fixture::new(|_| {}, true).await;
+    let elsewhere = "example.test";
+    let start_on = |address: &str| HttpGatewayStartOptions {
+        address: Some(address.to_owned()),
+        find_open_port: Some(true),
+        ..HttpGatewayStartOptions::default()
+    };
+    let refusal = |address: &str| {
+        let gateway = fixture.gateway.clone();
+        let start = start_on(address);
+
+        async move {
+            gateway
+                .start(&start)
+                .await
+                .expect_err("refused")
+                .to_string()
+        }
+    };
+
+    // listening: its address judged first
+    assert_eq!(
+        refusal(elsewhere).await,
+        format!(
+            "a server listens on an IP address, or on localhost, both loopbacks, not \"{elsewhere}\""
+        )
+    );
+    assert_eq!(refusal(HOST).await, "a gateway listens once");
+    fixture.gateway.dispose().await.expect("disposed");
+    // disposed: its disposal judged first
+    assert_eq!(refusal(elsewhere).await, "the gateway is disposed");
+    fixture.server.dispose().await.expect("the server disposed");
+}
+
 #[tokio::test]
 async fn writes_a_stream_its_result_then_each_notification_each_event_an_id() {
     let fixture = Fixture::new(|options| options.heartbeat = Some(NEVER), true).await;

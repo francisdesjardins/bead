@@ -528,12 +528,17 @@ public sealed class MemoryTransportClient : IRouterClientTransport, IAsyncDispos
             var early = new List<TransportMessage>();
             var isOpened = false;
             var isEndedEarly = false;
+
+            // what its server sent or ended as it drew the connection, counted as it is posted: the
+            // lists above fill in turns of their own, so they cannot tell
+            var came = 0;
             var peer = new MemoryPeer
             {
                 Address = options.Address,
                 Port = options.Port,
                 Deliver = (connection, message) =>
                 {
+                    Interlocked.Increment(ref came);
                     _scheduler.Post(() =>
                     {
                         if (isOpened)
@@ -548,6 +553,7 @@ public sealed class MemoryTransportClient : IRouterClientTransport, IAsyncDispos
                 },
                 Ended = (connection) =>
                 {
+                    Interlocked.Increment(ref came);
                     _scheduler.Post(() =>
                     {
                         if (isOpened)
@@ -586,6 +592,7 @@ public sealed class MemoryTransportClient : IRouterClientTransport, IAsyncDispos
 
             var isClosedEarly = false;
             var isOpen = false;
+            var isAnyEarly = false;
 
             lock (_gate)
             {
@@ -601,29 +608,47 @@ public sealed class MemoryTransportClient : IRouterClientTransport, IAsyncDispos
                         _connection = connection;
                         _readyState = ReadyState.Open;
                         isOpen = true;
+                        isAnyEarly = Volatile.Read(ref came) > 0;
                     }
                 }
             }
 
             if (isOpen)
             {
+                // * what its server sent as it drew the connection is handed on, or held by a pause,
+                // before the connect settles; a connect that nothing came before settles at once
+                // (spec 15.13)
+                var handed = isAnyEarly ? new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously) : null;
+
                 // * after every delivery posted before it, in order, then each as it comes
                 _scheduler.Post(() =>
                 {
-                    isOpened = true;
-
-                    foreach (var message in early)
+                    try
                     {
-                        Told(connection, message);
+                        isOpened = true;
+
+                        foreach (var message in early)
+                        {
+                            Told(connection, message);
+                        }
+
+                        early.Clear();
+
+                        if (isEndedEarly)
+                        {
+                            Ended(connection);
+                        }
                     }
-
-                    early.Clear();
-
-                    if (isEndedEarly)
+                    finally
                     {
-                        Ended(connection);
+                        handed?.TrySetResult();
                     }
                 });
+
+                if (handed is not null)
+                {
+                    await handed.Task;
+                }
 
                 return;
             }

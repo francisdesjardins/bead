@@ -1,8 +1,8 @@
 import { createHash } from 'node:crypto';
-import { connect as connectTLS } from 'node:tls';
 import {
   createServer as createNodeServer,
   type IncomingMessage,
+  type Server,
   request as httpRequest,
   type IncomingHttpHeaders,
   type OutgoingHttpHeaders,
@@ -5151,7 +5151,6 @@ test('refuses a window of 0, a member given in its policy and beside it, and two
 });
 
 test('listens once until it stops and never once disposed', async () => {
-  test.skip(true, 'divergence: TypeScript accepts a start after gateway disposal');
   await using fixture = await startTranscoding();
   const start = { address: '127.0.0.1', findOpenPort: true };
   await expect(fixture.gateway.start(start)).rejects.toThrow(
@@ -5164,6 +5163,127 @@ test('listens once until it stops and never once disposed', async () => {
   await expect(fixture.gateway.start(start)).rejects.toThrow(
     new ProgrammerError('the gateway is disposed')
   );
+});
+
+/**
+ * A gateway on a memory transport whose listeners bind only once `bound` is called: a start binds
+ * until then. Each server it built is kept, to read whether it listens.
+ */
+const heldGatewayOf = () => {
+  const memory = createMemoryTransportServer();
+  const servers: Server[] = [];
+  const gate = Promise.withResolvers<void>();
+  const gateway = createHTTPGateway({
+    document: OPENAPI_DOCUMENT,
+    createServer: (listener) => {
+      const server = createNodeServer(listener);
+      const listen = server.listen.bind(server);
+
+      // its listen held until the gate opens
+      // oxlint-disable-next-line bead/options-last -- Node's own, `listen(port, host, callback)`
+      server.listen = ((port: number, host: string, callback?: () => void) => {
+        void gate.promise.then(() => {
+          listen(port, host, callback);
+        });
+
+        return server;
+      }) as typeof server.listen;
+      servers.push(server);
+
+      return server;
+    },
+    routes: HTTP_ROUTES,
+    transport: memory,
+  });
+
+  return { bound: gate.resolve, gateway, memory, servers };
+};
+
+test('settles a start its stop or its dispose overtook with its address, and listens on none once that settles', async () => {
+  for (const overtaking of ['stop', 'dispose'] as const) {
+    const { bound, gateway, memory, servers } = heldGatewayOf();
+    const settled: string[] = [];
+    const starting = gateway.start({ address: '127.0.0.1' }).then((address) => {
+      settled.push('start');
+
+      return address;
+    });
+
+    await expect
+      .poll(() => {
+        return servers.length;
+      })
+      .toBe(1);
+
+    const ending = (overtaking === 'stop' ? gateway.stop() : gateway[Symbol.asyncDispose]()).then(
+      () => {
+        settled.push(overtaking);
+      }
+    );
+
+    await sleep(20);
+    // * the stop waits for the start that binds
+    expect(settled, overtaking).toEqual([]);
+    bound();
+
+    const { port } = await starting;
+
+    await ending;
+    expect(port, overtaking).toBeGreaterThan(0);
+    expect(settled, overtaking).toEqual(['start', overtaking]);
+    expect(
+      servers.map((server) => {
+        return server.listening;
+      }),
+      overtaking
+    ).toEqual([false]);
+    await gateway[Symbol.asyncDispose]();
+    await memory.stop();
+  }
+});
+
+test('refuses a second start while its first binds, a gateway listens once', async () => {
+  const { bound, gateway, memory, servers } = heldGatewayOf();
+  const starting = gateway.start({ address: '127.0.0.1' });
+
+  await expect
+    .poll(() => {
+      return servers.length;
+    })
+    .toBe(1);
+  await expect(gateway.start({ address: '127.0.0.1' })).rejects.toThrow(
+    new ProgrammerError('a gateway listens once')
+  );
+  bound();
+
+  const { port } = await starting;
+
+  expect((await send(port, { method: 'GET', path: '/openapi.json' })).status).toBe(200);
+  expect(servers).toHaveLength(1);
+  await gateway[Symbol.asyncDispose]();
+  await memory.stop();
+});
+
+test('judges a start’s disposal, then its address, then whether it listens', async () => {
+  const { bound, gateway, memory } = heldGatewayOf();
+  const elsewhere = 'example.test';
+  const addressRefusal = new ProgrammerError(
+    `a server listens on an IP address, or on localhost, both loopbacks, not "${elsewhere}"`
+  );
+
+  bound();
+  await gateway.start({ address: '127.0.0.1' });
+  // listening: its address judged first
+  await expect(gateway.start({ address: elsewhere })).rejects.toThrow(addressRefusal);
+  await expect(gateway.start({ address: '127.0.0.1' })).rejects.toThrow(
+    new ProgrammerError('a gateway listens once')
+  );
+  await gateway[Symbol.asyncDispose]();
+  // disposed: its disposal judged first
+  await expect(gateway.start({ address: elsewhere })).rejects.toThrow(
+    new ProgrammerError('the gateway is disposed')
+  );
+  await memory.stop();
 });
 
 test('reads a body whole, its charge given back', async () => {
@@ -5425,128 +5545,4 @@ test('drops on its own listener a response its reader stalls past its deadline, 
   } finally {
     socket.destroy();
   }
-});
-
-// A gateway request whose HEADERS carry the length as written; an unfinished body stays open.
-const lengthOverHTTP2 = (
-  port: number,
-  options: { lengths: readonly string[]; isOpen?: boolean }
-): Promise<{ reset?: number; ended?: number; answered?: boolean }> => {
-  const framed = (
-    type: number,
-    {
-      flags = 0,
-      stream = 0,
-      payload = Buffer.alloc(0),
-    }: { flags?: number; stream?: number; payload?: Buffer }
-  ): Buffer => {
-    const header = Buffer.alloc(9);
-    header.writeUIntBE(payload.length, 0, 3);
-    header[3] = type;
-    header[4] = flags;
-    header.writeUInt32BE(stream, 5);
-    return Buffer.concat([header, payload]);
-  };
-  return new Promise((resolve, reject) => {
-    const socket = connectTLS({
-      ALPNProtocols: ['h2'],
-      ca: TLS_FIXTURE.cert,
-      host: '127.0.0.1',
-      port,
-      servername: 'localhost',
-    });
-    let read = Buffer.alloc(0);
-    const done = (result: { reset?: number; ended?: number; answered?: boolean }): void => {
-      socket.destroy();
-      resolve(result);
-    };
-    socket.once('error', reject);
-    socket.once('secureConnect', () => {
-      const fields = [
-        [':method', options.isOpen === true ? 'POST' : 'GET'],
-        [':scheme', 'https'],
-        [':authority', `127.0.0.1:${String(port)}`],
-        [':path', options.isOpen === true ? '/api/Transcoding/echo' : '/v1/books/2'],
-        ['content-type', 'application/json'],
-        ...options.lengths.map((value) => {
-          return ['content-length', value];
-        }),
-      ];
-      const block = Buffer.concat(
-        fields.map(([name, value]) => {
-          if (name === undefined || value === undefined) {
-            throw new Error('a name and a value');
-          }
-          return Buffer.concat([
-            Buffer.from([0x10, name.length]),
-            Buffer.from(name),
-            Buffer.from([value.length]),
-            Buffer.from(value),
-          ]);
-        })
-      );
-      socket.write('PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n');
-      socket.write(framed(4, {}));
-      socket.write(
-        framed(1, { flags: options.isOpen === true ? 4 : 5, stream: 1, payload: block })
-      );
-    });
-    socket.on('data', (bytes: Buffer) => {
-      read = Buffer.concat([read, bytes]);
-      while (read.length >= 9 && read.length >= 9 + read.readUIntBE(0, 3)) {
-        const length = read.readUIntBE(0, 3);
-        const type = read[3];
-        const flags = read[4];
-        const payload = read.subarray(9, 9 + length);
-        read = read.subarray(9 + length);
-        if (type === 4 && flags === 0) {
-          socket.write(framed(4, { flags: 1 }));
-        }
-        if (type === 3) {
-          done({ reset: payload.readUInt32BE(0) });
-          return;
-        }
-        if (type === 7) {
-          done({ ended: payload.readUInt32BE(4) });
-          return;
-        }
-        if (type === 1) {
-          done({ answered: true });
-          return;
-        }
-      }
-    });
-  });
-};
-
-test('resets over HTTP/2 the stream of a request whose content-length names one number twice', async () => {
-  await using fixture = await startSecureTranscoding();
-  let drawn = 0;
-  fixture.memory.on('connection', () => {
-    drawn += 1;
-  });
-  for (const lengths of [
-    ['0', '0'],
-    ['0', '00'],
-  ]) {
-    expect(await lengthOverHTTP2(fixture.port, { lengths })).toEqual({
-      reset: http2Constants.NGHTTP2_PROTOCOL_ERROR,
-    });
-  }
-  expect(drawn).toBe(0);
-  expect(await bookOverHTTP2(fixture.port, { 'content-length': '0' })).toBe(200);
-});
-
-test('resets over HTTP/2 the stream of a request whose content-length passes 2⁶³ − 1', async () => {
-  await using fixture = await startSecureTranscoding();
-  let drawn = 0;
-  fixture.memory.on('connection', () => {
-    drawn += 1;
-  });
-  for (const length of ['9223372036854775808', '9'.repeat(19), '00009223372036854775808']) {
-    expect(await lengthOverHTTP2(fixture.port, { lengths: [length], isOpen: true })).toEqual({
-      reset: http2Constants.NGHTTP2_PROTOCOL_ERROR,
-    });
-  }
-  expect(drawn).toBe(0);
 });

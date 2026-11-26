@@ -290,7 +290,7 @@ public sealed class FrameMeterTests
         Assert.Equal(WebSocketCloseStatus.PolicyViolation, meter.Verdict?.Code);
     }
 
-    [Fact(Skip = "divergence: a 64-bit length with its top bit set reaches the reader until the whole length arrives")]
+    [Fact]
     public void Fails_with_1002_each_head_RFC_6455_forbids_at_the_byte_that_draws_it()
     {
         foreach (var (bytes, reason) in new (byte[] Bytes, string Reason)[]

@@ -63,6 +63,38 @@ public sealed partial class HttpTransportClientTests
         return await channel.Reader.ReadAsync(Cancelled).AsTask().WaitAsync(Patience, Cancelled);
     }
 
+    // ! a bind of port 0 draws a port free on its own family only, which another test's listener may
+    // hold on the other loopback. A localhost name's connect tries the IPv4 one first and reaches
+    // that listener. The server starts on the loopback given, on a port drawn free on both, and the
+    // other loopback keeps that port held, bound and not listening, until disposed
+    private static async Task<ClosedPort> StartedAloneOn(HttpTransportServer server, string address)
+    {
+        var other = address == "::1" ? IPAddress.Loopback : IPAddress.IPv6Loopback;
+
+        for (var attempt = 0; ; attempt += 1)
+        {
+            var held = new ClosedPort(other);
+
+            try
+            {
+                await server.Start(new TransportServerStartOptions { Address = address, Port = held.Port, CancellationToken = Cancelled });
+
+                return held;
+            }
+            catch (Exception reason) when (Loopbacks.IsInUse(reason) && attempt < 64)
+            {
+                // taken on the loopback given: another draw
+                held.Dispose();
+            }
+            catch
+            {
+                held.Dispose();
+
+                throw;
+            }
+        }
+    }
+
     private static async Task Eventually(Func<bool> condition)
     {
         for (var tries = 0; tries < 500 && !condition(); tries += 1)
@@ -2002,11 +2034,11 @@ public sealed partial class HttpTransportClientTests
         foreach (var address in Addresses.ReachedByLocalhost())
         {
             await using var server = new HttpTransportServer();
-            var port = (await server.Start(new TransportServerStartOptions { Address = address, FindOpenPort = true, CancellationToken = Cancelled })).Port;
+            using var held = await StartedAloneOn(server, address);
             await using var client = new HttpTransportClient(NotListening);
             var started = TimeProvider.System.GetTimestamp();
 
-            await client.Connect(new HttpTransportClientConnectOptions { Host = "localhost", Port = port, CancellationToken = Cancelled }).WaitAsync(Patience, Cancelled);
+            await client.Connect(new HttpTransportClientConnectOptions { Host = "localhost", Port = held.Port, CancellationToken = Cancelled }).WaitAsync(Patience, Cancelled);
             connects.Add((address, TimeProvider.System.GetElapsedTime(started)));
             Assert.Equal((address, ReadyState.Open), (address, client.ReadyState));
         }

@@ -30,7 +30,7 @@ public sealed class SessionManagerTests
 
     // definition
 
-    [Fact(Skip = "divergence: a superseded session timer callback emits a timeout after touch")]
+    [Fact]
     public void A_session_s_timer_that_fired_behind_the_touch_that_restarted_it_reaches_nothing()
     {
         var clock = new RefusingTimerClock();

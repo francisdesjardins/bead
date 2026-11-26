@@ -291,6 +291,33 @@ export const createRouterRequester = <Handle extends string>(
       : undefined;
   };
 
+  // a request the transport has: its hook told so; one that throws ends the call as its timer would,
+  // the peer told to cancel it, and fails it with that throw
+  const handOff = (waiting: IWaitingCall<Handle>): void => {
+    waiting.pendingRequest.isSent = true;
+
+    try {
+      waiting.pendingRequest.onSent?.(true);
+    } catch (thrown) {
+      endPending(toError(thrown), waiting);
+    }
+  };
+
+  // why a request its transport refused fails: the transport's reason, or the throw of its hook,
+  // told only while its call still waits
+  const refusalOf = (reason: unknown, { call, pendingRequest }: IWaitingCall<Handle>): Error => {
+    // handed over, then refused by the transport: nothing of it went out
+    if (pendingRequest.isSent && pendingCalls.get(call) === pendingRequest) {
+      try {
+        pendingRequest.onSent?.(false);
+      } catch (thrown) {
+        return toError(thrown);
+      }
+    }
+
+    return toError(reason);
+  };
+
   // a request as a transfer: its opening, then each chunk credited; the call waits on the transfer's
   // inactivity, then on its own timeout once the last chunk is handed off
   const sendRequest = (
@@ -351,17 +378,11 @@ export const createRouterRequester = <Handle extends string>(
         connectionHandle,
         credential: transportCredential,
         onHandOff: () => {
-          pendingRequest.isSent = true;
-          pendingRequest.onSent?.(true);
+          handOff(waiting);
         },
       }
     ).catch((reason: unknown) => {
-      // handed over, then refused by the transport: nothing of it went out
-      if (pendingRequest.isSent) {
-        pendingRequest.onSent?.(false);
-      }
-
-      pendingRequest.reject(toError(reason));
+      pendingRequest.reject(refusalOf(reason, waiting));
     });
   };
 
@@ -711,8 +732,7 @@ export const createRouterRequester = <Handle extends string>(
             connectionHandle,
             credential: transportCredential,
             onHandOff: () => {
-              pendingRequest.isSent = true;
-              pendingRequest.onSent?.(true);
+              handOff({ call, pendingRequest });
             },
           }
         ).then(
@@ -720,12 +740,7 @@ export const createRouterRequester = <Handle extends string>(
             port.activity('request', connectionHandle);
           },
           (reason: unknown) => {
-            // handed over, then refused by the transport: nothing of it went out
-            if (pendingRequest.isSent) {
-              pendingRequest.onSent?.(false);
-            }
-
-            reject(toError(reason));
+            reject(refusalOf(reason, { call, pendingRequest }));
           }
         );
 

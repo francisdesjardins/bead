@@ -449,12 +449,11 @@ fn on_request_hand_off<S: Side>(state: &mut S, (call, id): (&CallAddress, u64)) 
                 .map(|on_sent| hooked(|| on_sent(true)))
         });
 
-    // ! a hook that panics fails its own call, though it went, as one that throws rejects its call
-    // on the TypeScript side
-    if let Some(Err(error)) = heard
-        && let Some(mut request) = forget(state, (call, Some(id)))
-    {
-        settle(&mut request, Err(error));
+    // ! a hook that panics fails its own call, though it went: the call ends as a timeout ends it,
+    // the peer told to cancel it, then settled with the panic; the transport refusing it after
+    // tells the hook nothing more
+    if let Some(Err(error)) = heard {
+        end_pending(state, (error, call, id));
     }
 }
 

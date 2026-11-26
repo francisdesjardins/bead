@@ -31,15 +31,25 @@ public sealed partial class RouterCoreTests
         Assert.Equal([Handle], peer.ReportedOn);
     }
 
-    [Fact(Skip = "divergence: a throwing OnSent hook leaves its call waiting after the failed handoff")]
+    [Fact]
     public async Task A_hook_that_panics_fails_its_own_call_and_the_router_answers_the_next()
     {
         var peer = new Peer(RouterSide.Server);
         using var core = peer.Core;
 
+        List<(EnvelopeKind Kind, uint CallId)> KindsOf(int from)
+        {
+            return [.. peer.Sent.Skip(from).Select((envelope) =>
+            {
+                return (envelope.Kind, envelope.Header.CallId);
+            })];
+        }
+
         foreach (var onCallId in new[] { true, false })
         {
             var broken = new InvalidOperationException("this hook breaks, on purpose");
+            var told = new List<bool>();
+            var from = peer.Sent.Count;
             var request = CallOf(Handle, (Echo, TimeSpan.FromSeconds(1))) with
             {
                 OnCallId = onCallId ? (_) =>
@@ -47,8 +57,10 @@ public sealed partial class RouterCoreTests
                     throw broken;
                 }
                 : null,
-                OnSent = onCallId ? null : (_) =>
+                OnSent = onCallId ? null : (isSent) =>
                 {
+                    told.Add(isSent);
+
                     throw broken;
                 },
             };
@@ -61,16 +73,106 @@ public sealed partial class RouterCoreTests
             Assert.Same(broken, refused);
             if (onCallId)
             {
+                // nothing went, and nothing of the call is kept
                 Assert.Empty(peer.Sent);
             }
+            else
+            {
+                var callId = peer.Sent[from].Header.CallId;
+
+                // gone out, then ended by its hook as a timeout ends it: the peer told to cancel it
+                Assert.Equal([(EnvelopeKind.Request, callId), (EnvelopeKind.Cancel, callId)], KindsOf(from));
+                Assert.Equal([true], told);
+            }
+
+            Assert.Equal(0, (await GaugesOf(peer)).Counts["pendingCalls"]);
+        }
+
+        // a hook that throws as its transport then refuses the send: told nothing more, the call failed
+        // by the hook's throw
+        {
+            var broken = new InvalidOperationException("this OnSent breaks, on purpose");
+            var told = new List<bool>();
+            var from = peer.Sent.Count;
+            var held = new List<TaskCompletionSource>();
+
+            peer.OnSend = (_) =>
+            {
+                var sending = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+
+                held.Add(sending);
+
+                return sending.Task;
+            };
+
+            var asking = core.Request("hi"u8.ToArray(), CallOf(Handle, (Echo, TimeSpan.FromSeconds(1))) with
+            {
+                OnSent = (isSent) =>
+                {
+                    told.Add(isSent);
+
+                    throw broken;
+                },
+            });
+
+            Assert.Same(broken, await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            {
+                return asking.WaitAsync(Patience, TestContext.Current.CancellationToken);
+            }));
+
+            var callId = peer.Sent[from].Header.CallId;
+
+            Assert.Equal([(EnvelopeKind.Request, callId), (EnvelopeKind.Cancel, callId)], KindsOf(from));
+
+            // the request's send refused, the cancel's taken
+            peer.OnSend = null;
+            held[0].SetException(new IOException("the transport refuses it"));
+            held[1].SetResult();
+            await peer.Settle();
+
+            Assert.Equal([true], told);
+            Assert.Same(broken, await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            {
+                return asking.WaitAsync(Patience, TestContext.Current.CancellationToken);
+            }));
+        }
+
+        // a hook told its send refused while its call waits, that throws: its throw is the call's failure
+        {
+            var broken = new InvalidOperationException("this OnSent breaks, on purpose");
+            var told = new List<bool>();
+
+            peer.OnSend = (_) =>
+            {
+                return Task.FromException(new IOException("the transport refuses it"));
+            };
+
+            var asking = core.Request("hi"u8.ToArray(), CallOf(Handle, (Echo, TimeSpan.FromSeconds(1))) with
+            {
+                OnSent = (isSent) =>
+                {
+                    told.Add(isSent);
+                    if (!isSent)
+                    {
+                        throw broken;
+                    }
+                },
+            });
+
+            Assert.Same(broken, await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            {
+                return asking.WaitAsync(Patience, TestContext.Current.CancellationToken);
+            }));
+            Assert.Equal([true, false], told);
+            peer.OnSend = null;
         }
 
         var next = peer.Request("hi"u8.ToArray(), TimeSpan.FromSeconds(1));
-        var callId = await peer.CallIdOf(next);
+        var nextCallId = await peer.CallIdOf(next);
 
-        await peer.Deliver(new Envelope { Header = new ResultHeader { CallId = callId } });
+        await peer.Deliver(new Envelope { Header = new ResultHeader { CallId = nextCallId } });
 
-        Assert.Equal(callId, (await next.WaitAsync(Patience, TestContext.Current.CancellationToken)).Header.CallId);
+        Assert.Equal(nextCallId, (await next.WaitAsync(Patience, TestContext.Current.CancellationToken)).Header.CallId);
         Assert.Empty(peer.Reports);
     }
 

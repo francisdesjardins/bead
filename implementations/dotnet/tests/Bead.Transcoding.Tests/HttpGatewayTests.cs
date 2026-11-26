@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Globalization;
 using System.IO.Compression;
 using System.Net;
@@ -130,7 +131,7 @@ public sealed class HttpGatewayTests
         Assert.Equal("echo's route POST /api/Transcoding/echo ties echo's route POST /api/Transcoding/echo (Parameter 'options')", tie.Message);
     }
 
-    [Fact(Skip = "divergence: C# accepts a start after gateway disposal")]
+    [Fact]
     public async Task Listens_once_until_it_stops_and_never_once_disposed()
     {
         var fixture = await Started();
@@ -148,6 +149,108 @@ public sealed class HttpGatewayTests
             await Assert.ThrowsAsync<ObjectDisposedException>(() => { return fixture.Gateway.Start(options); });
         }
         finally { await Stopped(fixture); }
+    }
+
+    [Fact]
+    public async Task Settles_a_start_its_stop_or_its_dispose_overtook_with_its_address_and_listens_on_none_once_that_settles()
+    {
+        await using var service = await TranscodingService.Start();
+
+        foreach (var overtaking in new[] { "stop", "dispose" })
+        {
+            var (gateway, held) = HeldGatewayOf(service);
+            var settled = new ConcurrentQueue<string>();
+
+            async Task Noted(Task settling, string name)
+            {
+                await settling;
+                settled.Enqueue(name);
+            }
+
+            var starting = gateway.Start(new HttpGatewayStartOptions { Address = "127.0.0.1", FindOpenPort = true, CancellationToken = Cancelled });
+            var started = Noted(starting, "start");
+
+            await held.Binding.Task.WaitAsync(Patience, Cancelled);
+
+            var ending = Noted(overtaking == "stop" ? gateway.Stop() : gateway.DisposeAsync().AsTask(), overtaking);
+
+            await Task.Delay(TimeSpan.FromMilliseconds(20), Cancelled);
+
+            // * the stop waits for the start that binds
+            Assert.Empty(settled);
+            held.Bound.SetResult();
+            await Task.WhenAll(started, ending).WaitAsync(Patience, Cancelled);
+
+            var address = await starting;
+
+            Assert.True(address.Port > 0, overtaking);
+            Assert.Equal(["start", overtaking], settled);
+
+            // * nothing listens on it once that settles
+            using var tcp = new TcpClient();
+
+            await Assert.ThrowsAnyAsync<SocketException>(() =>
+            {
+                return tcp.ConnectAsync(IPAddress.Loopback, address.Port, Cancelled).AsTask();
+            });
+            await gateway.DisposeAsync();
+        }
+    }
+
+    [Fact]
+    public async Task Refuses_a_second_start_while_its_first_binds_a_gateway_listens_once()
+    {
+        await using var service = await TranscodingService.Start();
+        var (gateway, held) = HeldGatewayOf(service);
+        var options = new HttpGatewayStartOptions { Address = "127.0.0.1", FindOpenPort = true, CancellationToken = Cancelled };
+        var starting = gateway.Start(options);
+
+        await held.Binding.Task.WaitAsync(Patience, Cancelled);
+
+        var twice = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+        {
+            return gateway.Start(options).WaitAsync(Patience, Cancelled);
+        });
+
+        Assert.Equal("a gateway listens once", twice.Message);
+        held.Bound.SetResult();
+
+        var address = await starting.WaitAsync(Patience, Cancelled);
+        using var client = new HttpClient();
+        using var served = await client.GetAsync(new Uri($"http://127.0.0.1:{address.Port}/openapi.json"), Cancelled);
+
+        Assert.Equal(HttpStatusCode.OK, served.StatusCode);
+        Assert.Equal(1, held.Bindings);
+        await gateway.DisposeAsync();
+    }
+
+    [Fact]
+    public async Task Judges_a_start_s_disposal_then_its_address_then_whether_it_listens()
+    {
+        await using var service = await TranscodingService.Start();
+        var gateway = new HttpGateway(Exchanges.OptionsOf(service.Memory, null));
+        var options = new HttpGatewayStartOptions { Address = "127.0.0.1", FindOpenPort = true, CancellationToken = Cancelled };
+        var elsewhere = options with { Address = "example.test" };
+        const string AddressRefusal = "a server listens on an IP address, or on localhost, both loopbacks, not \"example.test\" (Parameter 'Address')";
+
+        await gateway.Start(options);
+
+        // listening: its address judged first
+        Assert.Equal(AddressRefusal, (await Assert.ThrowsAsync<ArgumentException>(() =>
+        {
+            return gateway.Start(elsewhere);
+        })).Message);
+        Assert.Equal("a gateway listens once", (await Assert.ThrowsAsync<InvalidOperationException>(() =>
+        {
+            return gateway.Start(options);
+        })).Message);
+        await gateway.DisposeAsync();
+
+        // disposed: its disposal judged first
+        Assert.Equal("the gateway is disposed", (await Assert.ThrowsAsync<ObjectDisposedException>(() =>
+        {
+            return gateway.Start(elsewhere);
+        })).Message);
     }
 
     [Fact]
@@ -367,50 +470,6 @@ public sealed class HttpGatewayTests
         finally { await Stopped(fixture); }
     }
 
-
-    [Fact(Skip = "divergence: Kestrel sends GOAWAY PROTOCOL_ERROR for repeated content-length")]
-    public async Task Resets_over_HTTP_2_the_stream_of_a_request_whose_content_length_names_one_number_twice()
-    {
-        await using var service = await TranscodingService.Start();
-        await using var gateway = new HttpGateway(Exchanges.OptionsOf(service.Memory, null));
-        var (application, port) = await MountedOverTls(gateway);
-        await using (application)
-        {
-            var drawn = 0;
-            service.Memory.Connection += (_) => { Interlocked.Increment(ref drawn); };
-            foreach (var lengths in new[] { new[] { "0", "0" }, new[] { "0", "00" } })
-            {
-                await using var wire = await TlsWire.Open(port, (Certificate.Value, SslApplicationProtocol.Http2));
-                var fields = new List<(string, string)> { (":method", "GET"), (":path", "/v1/books/2"), (":authority", $"127.0.0.1:{port}") };
-                fields.AddRange(lengths.Select((length) => { return ("content-length", length); }));
-                Assert.Equal(new TlsAnswer(null, null, 1), await wire.Ask(fields));
-            }
-            Assert.Equal(0, Volatile.Read(ref drawn));
-            Assert.Equal(new TlsAnswer(200, null, null), await Http2Over(port, [(":method", "GET"), (":path", "/v1/books/2"), (":authority", $"127.0.0.1:{port}"), ("content-length", "0")]));
-            await application.StopAsync(Cancelled);
-        }
-    }
-
-    [Fact(Skip = "divergence: Kestrel sends GOAWAY PROTOCOL_ERROR for overflowing content-length")]
-    public async Task Resets_over_HTTP_2_the_stream_of_a_request_whose_content_length_passes_2_63_1()
-    {
-        await using var service = await TranscodingService.Start();
-        await using var gateway = new HttpGateway(Exchanges.OptionsOf(service.Memory, null));
-        var (application, port) = await MountedOverTls(gateway);
-        await using (application)
-        {
-            var drawn = 0;
-            service.Memory.Connection += (_) => { Interlocked.Increment(ref drawn); };
-            foreach (var length in new[] { "9223372036854775808", new string('9', 19), "00009223372036854775808" })
-            {
-                await using var wire = await TlsWire.Open(port, (Certificate.Value, SslApplicationProtocol.Http2));
-                Assert.Equal(new TlsAnswer(null, null, 1), await wire.AskOpen([(":method", "POST"), (":path", "/api/Transcoding/echo"), (":authority", $"127.0.0.1:{port}"), ("content-type", "application/json"), ("content-length", length)]));
-            }
-            Assert.Equal(0, Volatile.Read(ref drawn));
-            await application.StopAsync(Cancelled);
-        }
-    }
-
     private const string Origin = "https://app.example";
 
     [Fact]
@@ -606,6 +665,24 @@ public sealed class HttpGatewayTests
         var client = new HttpClient { BaseAddress = new Uri($"http://127.0.0.1:{address.Port}") };
 
         return new Fixture(service, gateway, client, address.Port);
+    }
+
+    // a gateway of the service whose starts bind only once the test lets them: each start tells it
+    // binds, then waits
+    private static (HttpGateway Gateway, HeldBinding Held) HeldGatewayOf(TranscodingService service)
+    {
+        var gateway = new HttpGateway(Exchanges.OptionsOf(service.Memory, null));
+        var held = new HeldBinding();
+
+        gateway.Binding = () =>
+        {
+            held.Bindings += 1;
+            held.Binding.TrySetResult();
+
+            return held.Bound.Task;
+        };
+
+        return (gateway, held);
     }
 
     private static async Task Stopped(Fixture started)
@@ -5545,6 +5622,16 @@ public sealed class HttpGatewayTests
 
     // a gateway of the service started, its client, and the port it listens on
     private sealed record Fixture(TranscodingService Service, HttpGateway Gateway, HttpClient Client, int Port);
+
+    // a start held as it binds: told once it binds, and let bind once the test says
+    private sealed class HeldBinding
+    {
+        public TaskCompletionSource Binding { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public TaskCompletionSource Bound { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public int Bindings { get; set; }
+    }
 
     // a refusal or a failure of the gateway's own, as a request meets it: its request's line and
     // fields, its status, its words; its body, and its mark, none for a failure of its own

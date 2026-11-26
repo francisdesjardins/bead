@@ -17,8 +17,9 @@ internal static class LoopbackFailures
 /// <summary>
 /// A port nothing listens on, held until disposed, as the TypeScript side's <c>closedPort</c> and the
 /// Rust side's <c>closed_port</c> are: a socket bound on 127.0.0.1 and one on ::1, where this machine
-/// has it, both on the same port and neither listening, so that a connect to either is refused and no
-/// other test's listener is given that port meanwhile.
+/// has it, both on the same port and neither listening, so that a connect to either is refused.
+/// Another test's draw of a port never takes it meanwhile. On Linux, a bind of that port by its
+/// number is not kept off.
 /// </summary>
 internal sealed class ClosedPort : IDisposable
 {
@@ -52,6 +53,24 @@ internal sealed class ClosedPort : IDisposable
                 Port = port;
 
                 return;
+            }
+        }
+    }
+
+    /// <summary>
+    /// A port drawn free on both loopbacks and held on the one given alone: a listener of the other
+    /// family alone takes it there, and a connect to this one is refused.
+    /// </summary>
+    public ClosedPort(IPAddress loopback) : this()
+    {
+        ArgumentNullException.ThrowIfNull(loopback);
+
+        foreach (var socket in _held.ToList())
+        {
+            if (!((IPEndPoint)socket.LocalEndPoint!).Address.Equals(loopback))
+            {
+                socket.Dispose();
+                _held.Remove(socket);
             }
         }
     }

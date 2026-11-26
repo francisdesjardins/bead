@@ -2871,6 +2871,32 @@ test.describe('createMqttBrokerAdapter', () => {
     await adapter.stop();
   });
 
+  // spec 15.26
+  test('asks its password provider outside the call to start, before the start settles', async () => {
+    // whether the application's call to start runs, as each ask of its provider saw it
+    let isCalling = false;
+    const asked: boolean[] = [];
+    const adapter = adapterOf(script, {
+      passwordProvider: () => {
+        asked.push(isCalling);
+
+        return PASSWORD;
+      },
+    });
+
+    isCalling = true;
+    const starting = adapter.start();
+    isCalling = false;
+    const link = await script.link();
+
+    link.send({ cmd: 'connack', properties: {}, reasonCode: 0, sessionPresent: false });
+    await starting;
+
+    // read once the start settled: a provider not asked yet would pass a read before it
+    expect(asked).toEqual([false]);
+    await adapter.stop();
+  });
+
   test('fails its start once its password provider outlives its connect timeout, and takes no late answer', async () => {
     const late = Promise.withResolvers<string>();
     const adapter = adapterOf(script, {
@@ -3560,8 +3586,9 @@ test.describe('createMqttBrokerAdapter, against a broker over MQTT 5', () => {
       expect(await adapter.publish({ expiresAfter: 5_000, payload: parcel, topic: inbox })).toBe(
         BROKER_PUBLISHED.TAKEN
       );
+      // * its PUBACK gone: a count read in its settle's own turn differs by side (docs/support.md)
       await until(() => {
-        return kinds.length > 0;
+        return kinds.length > 0 && adapter.unsettled === 0;
       });
       expect(kinds).toEqual([ParcelKind.RESET]);
       expect(adapter.unsettled).toBe(0);

@@ -346,12 +346,14 @@ export const createHTTPCaller = (
 
       let raw: Uint8Array;
 
+      // * a string atob refuses, or one it reads that its canonical form does not give back, is not
+      // standard padded base64 (RFC 4648 §4)
       try {
         raw = Uint8Array.from(atob(value), (character) => {
           return character.charCodeAt(0);
         });
       } catch (cause) {
-        throw invalid('the HTTP payload cannot be decoded', cause);
+        throw invalid('an HTTP raw event holds standard padded base64', cause);
       }
 
       if (base64Of(raw) !== value) {

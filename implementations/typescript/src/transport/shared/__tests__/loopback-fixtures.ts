@@ -10,6 +10,7 @@ import { once } from 'node:events';
 import { createServer as createHttpServer, type IncomingMessage } from 'node:http';
 import { connect, createServer as createTcpServer, type AddressInfo, type Socket } from 'node:net';
 import { getGlobalDispatcher, ProxyAgent, setGlobalDispatcher } from 'undici';
+import type { ITransportServer } from '../../server/types';
 
 // interfaces
 
@@ -99,6 +100,11 @@ const heldFrom = async (address: string, localPort?: number) => {
 
   return {
     port: socket.localPort ?? 0,
+    // * let go by a reset, which leaves no TIME_WAIT on the port for a listener to meet
+    release: async () => {
+      socket.resetAndDestroy();
+      await disposed();
+    },
     [Symbol.asyncDispose]: async () => {
       socket.destroy();
       await disposed();
@@ -212,17 +218,29 @@ export const withoutUndici = (): Disposable => {
 /**
  * A port nothing listens on, held until disposed, as the C# side's `ClosedPort` and the Rust side's
  * `closed_port` are: the local port of a connection held open on 127.0.0.1, and of one on ::1 where
- * this machine has it, so that a connect to either is refused and no other test's listener is given
- * that port meanwhile.
+ * this machine has it, so that a connect to either is refused. Another test's draw of a port never
+ * takes it meanwhile. On Linux, a listen on that port by its number is not kept off. Given a
+ * loopback, it is held there alone, drawn free on both: the other one's is for a listener of that
+ * family alone.
  */
 // ! Node binds no TCP socket without listening on it, so a connection's own end holds the port; a
 // port let go before its connect is one another test's listener may take in the meantime
-export const closedPort = async (): Promise<AsyncDisposable & { port: number }> => {
+export const closedPort = async (
+  loopback?: string
+): Promise<AsyncDisposable & { port: number }> => {
   for (;;) {
     const ipv4 = await heldFrom('127.0.0.1');
 
     try {
       const ipv6 = await heldFrom('::1', ipv4.port);
+
+      if (loopback !== undefined) {
+        const [held, other] = loopback === '::1' ? [ipv6, ipv4] : [ipv4, ipv6];
+
+        await other.release();
+
+        return held;
+      }
 
       return {
         port: ipv4.port,
@@ -234,11 +252,53 @@ export const closedPort = async (): Promise<AsyncDisposable & { port: number }> 
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== 'EADDRINUSE') {
         // * a machine without the IPv6 loopback refuses its connect there all the same
+        if (loopback === '::1') {
+          await ipv4.release();
+
+          return {
+            port: ipv4.port,
+            [Symbol.asyncDispose]: () => {
+              return Promise.resolve();
+            },
+          };
+        }
+
         return ipv4;
       }
 
       // * taken on ::1 already: another port
       await ipv4[Symbol.asyncDispose]();
+    }
+  }
+};
+
+/**
+ * Starts `server` on the loopback `address` alone, on a port drawn free on both loopbacks, and
+ * holds that port on the other one until disposed, as the C# side's `StartedAloneOn` and the Rust
+ * side's `started_alone_on` do; drawn again where another socket took it between.
+ */
+// ! a draw of port 0 gives a port free on its own family only, which another test's listener may
+// hold on the other loopback. A localhost name's connect tries the IPv4 one first and reaches that
+// listener
+export const startedAloneOn = async (
+  server: Pick<ITransportServer, 'start'>,
+  address: string
+): Promise<AsyncDisposable & { port: number }> => {
+  for (let attempt = 0; ; attempt += 1) {
+    const held = await closedPort(address === '::1' ? '127.0.0.1' : '::1');
+
+    try {
+      await server.start({ address, port: held.port });
+
+      return held;
+    } catch (error) {
+      await held[Symbol.asyncDispose]();
+
+      if ((error as NodeJS.ErrnoException).code !== 'EADDRINUSE' || attempt >= 64) {
+        throw error;
+      }
+
+      // * taken on the loopback given: another draw
     }
   }
 };
