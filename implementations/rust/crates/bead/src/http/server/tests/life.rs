@@ -15,6 +15,7 @@ use crate::failure::ProcedureAddress;
 use crate::http::fields::{BEAD_MEDIA_TYPE, CONNECTION_TOKEN_HEADER, HTTP_REFUSALS};
 use crate::http::peer::*;
 use crate::router::types::{ConnectionHandle, RouterError};
+use crate::testing::closed_port::drawn_non_ephemeral;
 use crate::testing::{SteppingClock, rest};
 use crate::transport::{ReadyState, ServerListener, ServerTransport, TransportServerStartOptions};
 
@@ -1404,7 +1405,21 @@ async fn is_secure_on_the_ipv6_loopback_or_an_address_in_127_0_0_0_8_and_not_on_
 
 #[tokio::test]
 async fn refuses_a_start_once_disposed_its_state_kept_and_disposes_once_stopping_it_first() {
-    let started = started(&HttpTransportServerOptions::default()).await;
+    let mut started = started(&HttpTransportServerOptions::default()).await;
+
+    // ! its port probed once it stopped: moved first to one below the ephemeral range, which no
+    // other test's bind of port 0 takes meanwhile
+    started.server.stop().await.unwrap();
+    started.port = started
+        .server
+        .start(&TransportServerStartOptions {
+            address: Some(HOST.to_owned()),
+            port: Some(drawn_non_ephemeral().unwrap()),
+            ..TransportServerStartOptions::default()
+        })
+        .await
+        .unwrap()
+        .port;
 
     started.server.dispose().await.unwrap();
 

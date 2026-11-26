@@ -11,6 +11,7 @@ using System.Security.Cryptography.X509Certificates;
 using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
+using Bead.Tests;
 using Bead.Transcoding.Http;
 using Bead.Transcoding.V1;
 using Bead.Transport.Http.Tests;
@@ -168,7 +169,9 @@ public sealed class HttpGatewayTests
                 settled.Enqueue(name);
             }
 
-            var starting = gateway.Start(new HttpGatewayStartOptions { Address = "127.0.0.1", FindOpenPort = true, CancellationToken = Cancelled });
+            // ! its port probed once it let it go: one below the ephemeral range, which no other test's
+            // bind of port 0 takes meanwhile
+            var starting = gateway.Start(new HttpGatewayStartOptions { Address = "127.0.0.1", Port = NonEphemeralPorts.Drawn(), CancellationToken = Cancelled });
             var started = Noted(starting, "start");
 
             await held.Binding.Task.WaitAsync(Patience, Cancelled);

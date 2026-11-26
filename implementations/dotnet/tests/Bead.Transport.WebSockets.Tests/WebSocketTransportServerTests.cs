@@ -60,6 +60,13 @@ public sealed partial class WebSocketTransportServerTests : IAsyncLifetime
 
     private static readonly TransportServerStartOptions Loopback = new() { Address = "127.0.0.1", FindOpenPort = true };
 
+    // ! a test that probes its server's port once it stopped starts it on one below the ephemeral
+    // range, which no other test's bind of port 0 takes meanwhile
+    private static TransportServerStartOptions NonEphemeral()
+    {
+        return new TransportServerStartOptions { Address = "127.0.0.1", Port = NonEphemeralPorts.Drawn(), CancellationToken = Cancelled };
+    }
+
     private readonly Channel<(TransportMessage Message, string ConnectionHandle)> _messages = Channel.CreateUnbounded<(TransportMessage, string)>();
     private readonly Channel<(bool WasClean, string ConnectionHandle)> _closes = Channel.CreateUnbounded<(bool, string)>();
     private readonly Channel<string> _connections = Channel.CreateUnbounded<string>();
@@ -98,11 +105,11 @@ public sealed partial class WebSocketTransportServerTests : IAsyncLifetime
         await Start(new WebSocketTransportServer(options));
     }
 
-    private async Task Start(WebSocketTransportServer server)
+    private async Task Start(WebSocketTransportServer server, TransportServerStartOptions? start = null)
     {
         await _server.Stop();
         _server = server;
-        await Listen();
+        await Listen(start ?? Loopback);
     }
 
     private Task Listen()
@@ -545,36 +552,6 @@ public sealed partial class WebSocketTransportServerTests : IAsyncLifetime
         }
     }
 
-    // ! ports below every system's ephemeral range (RFC 6335 §6), which no bind of port 0 is given: a
-    // test that probes the IPv4 loopback on a port it drew draws it here, or another test's bind of
-    // port 0 may take that port on IPv4 meanwhile
-    private const int NonEphemeralPorts = 20_000;
-    private const int NonEphemeralPortsCount = 10_000;
-
-    // a port below the ephemeral range free on both loopbacks as it is drawn, let go at once
-    private static int DrawnNonEphemeral()
-    {
-        for (var attempt = 0; ; attempt += 1)
-        {
-            var port = NonEphemeralPorts + Random.Shared.Next(NonEphemeralPortsCount);
-
-            try
-            {
-                using var v4 = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
-                using var v6 = new Socket(AddressFamily.InterNetworkV6, SocketType.Stream, ProtocolType.Tcp) { DualMode = false };
-
-                v4.Bind(new IPEndPoint(IPAddress.Loopback, port));
-                v6.Bind(new IPEndPoint(IPAddress.IPv6Loopback, port));
-
-                return port;
-            }
-            catch (SocketException) when (attempt < 64)
-            {
-                // taken on one loopback or the other: another draw
-            }
-        }
-    }
-
     // a socket of another process's on the IPv6 loopback, IPv6 alone, listening on the port given,
     // for 0 one below the ephemeral range free on both loopbacks
     private static Socket HeldOnIPv6(int port)
@@ -585,7 +562,7 @@ public sealed partial class WebSocketTransportServerTests : IAsyncLifetime
             {
                 try
                 {
-                    return HeldOnIPv6(DrawnNonEphemeral());
+                    return HeldOnIPv6(NonEphemeralPorts.Drawn());
                 }
                 catch (SocketException) when (attempt < 64)
                 {
@@ -629,6 +606,18 @@ public sealed partial class WebSocketTransportServerTests : IAsyncLifetime
         var stateType = state.GetType();
 
         return ((int)stateType.GetProperty("DelayMs", Properties)!.GetValue(state)!, (int)stateType.GetProperty("TimeoutMs", Properties)!.GetValue(state)!);
+    }
+
+    // ! the count of the pings the platform's keep-alive asked for on a socket it accepted, read by the
+    // private names of .NET 10's ManagedWebSocket, which shows it nowhere else: each asked as it comes
+    // due, then queued behind the send under way
+    private static long PingsAskedOf(WebSocket socket)
+    {
+        const BindingFlags Fields = BindingFlags.NonPublic | BindingFlags.Instance;
+        const BindingFlags Properties = BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance;
+        var state = socket.GetType().GetField("_keepAlivePingState", Fields)!.GetValue(socket)!;
+
+        return Convert.ToInt64(state.GetType().GetProperty("PingPayload", Properties)!.GetValue(state)!, CultureInfo.InvariantCulture);
     }
 
     // a server whose every socket accepted is written to the channel given, as it was accepted
@@ -1016,7 +1005,7 @@ public sealed partial class WebSocketTransportServerTests : IAsyncLifetime
             {
                 DrawPort = () =>
                 {
-                    drawn.Add(drawn.Count == 0 ? held : DrawnNonEphemeral());
+                    drawn.Add(drawn.Count == 0 ? held : NonEphemeralPorts.Drawn());
 
                     return drawn[^1];
                 },
@@ -2408,7 +2397,7 @@ public sealed partial class WebSocketTransportServerTests : IAsyncLifetime
 
         var starting = Task.Run(() =>
         {
-            return server.Start(Loopback with { CancellationToken = Cancelled });
+            return server.Start(NonEphemeral());
         }, Cancelled);
 
         await building.Task.WaitAsync(Patience, Cancelled);
@@ -2617,7 +2606,7 @@ public sealed partial class WebSocketTransportServerTests : IAsyncLifetime
             {
                 connected.TrySetResult();
             };
-            port = (await server.Start(Loopback with { CancellationToken = Cancelled })).Port;
+            port = (await server.Start(NonEphemeral())).Port;
             await client.ConnectAsync(UriOf(port), Cancelled);
             await connected.Task.WaitAsync(Patience, Cancelled);
             answering = AnswerClose(client);
@@ -2633,6 +2622,8 @@ public sealed partial class WebSocketTransportServerTests : IAsyncLifetime
     public async Task Shutdown_stops_it_as_Stop_does()
     {
         // the name a server's facade stops its transport by, which only the C# side has
+        await Start(new WebSocketTransportServer(), NonEphemeral());
+
         var (client, _) = await Connect();
 
         using (client)
@@ -2649,6 +2640,8 @@ public sealed partial class WebSocketTransportServerTests : IAsyncLifetime
     [Fact]
     public async Task Stop_closes_every_connection_each_raising_its_close_before_it_resolves_and_stops_listening()
     {
+        await Start(new WebSocketTransportServer(), NonEphemeral());
+
         var (first, firstHandle) = await Connect();
         var (second, secondHandle) = await Connect();
 
@@ -2725,7 +2718,7 @@ public sealed partial class WebSocketTransportServerTests : IAsyncLifetime
             throw new IOException("stop failed");
         };
 
-        var port = (await server.Start(Loopback with { CancellationToken = Cancelled })).Port;
+        var port = (await server.Start(NonEphemeral())).Port;
 
         Assert.Equal("stop failed", (await Assert.ThrowsAsync<IOException>(() =>
         {
@@ -3604,10 +3597,13 @@ public sealed partial class WebSocketTransportServerTests : IAsyncLifetime
     [Fact]
     public async Task Pings_ahead_of_what_it_holds_unsent_so_a_silent_reader_behind_a_backlog_reads_the_ping_before_the_backlog_s_end_and_is_kept()
     {
-        await Start(new WebSocketTransportServerOptions { Heartbeat = TimeSpan.FromMilliseconds(1_000), MaximumUnsentBytes = 67_108_864, MinimumSendBytesPerSecond = 0 });
+        var accepted = Channel.CreateUnbounded<WebSocket>();
+
+        await Start(Keeping(accepted, new WebSocketTransportServerOptions { Heartbeat = TimeSpan.FromMilliseconds(1_000), MaximumUnsentBytes = 67_108_864, MinimumSendBytesPerSecond = 0 }));
 
         var (tcp, _) = await Upgraded(UpgradeRequest());
         var connectionHandle = await Next(_connections);
+        var socket = await Next(accepted);
         var order = new List<int>();
 
         using (tcp)
@@ -3620,9 +3616,15 @@ public sealed partial class WebSocketTransportServerTests : IAsyncLifetime
                 _ = _server.Send(new TransportMessage(new byte[65_536], false), connectionHandle);
             }
 
-            // its ping out, a heartbeat and a half past its last read, .NET's keep-alive pinging up to a quarter
-            // of a heartbeat late, it reads all, echoing the ping as it comes
-            await Task.Delay(1_500, Cancelled);
+            // ! its ping asked a heartbeat past its last read, .NET's keep-alive up to a quarter of a
+            // heartbeat late, and its drop a heartbeat after that: no wait on the clock falls between
+            // the two on every run, so the ask itself is waited for. Then it reads all, echoing the
+            // ping as it comes
+            await Until(() =>
+            {
+                return PingsAskedOf(socket) > 0;
+            });
+            Assert.Equal(1, PingsAskedOf(socket));
 
             while (order.Count < 401)
             {
@@ -3639,8 +3641,12 @@ public sealed partial class WebSocketTransportServerTests : IAsyncLifetime
 
             Assert.InRange(order.IndexOf(0x9), 0, 399);
 
-            // its echo read within its heartbeat: kept
-            await Task.Delay(1_200, Cancelled);
+            // its echo read within its heartbeat: kept, and pinged again a heartbeat past it, which no
+            // ping left unanswered allows
+            var next = await FrameFrom(stream);
+
+            Assert.Equal(0x9, next?.Opcode);
+            Assert.Equal([0, 0, 0, 0, 0, 0, 0, 2], next!.Value.Payload);
             Assert.Equal(0, _closes.Reader.Count);
         }
     }

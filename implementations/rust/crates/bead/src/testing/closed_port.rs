@@ -15,7 +15,7 @@ use std::sync::Arc;
 use socket2::{Domain, Protocol, Socket, Type};
 
 #[cfg(any(feature = "websocket", feature = "http"))]
-use crate::net::loopbacks::is_in_use;
+use crate::net::loopbacks::{is_absent, is_in_use};
 #[cfg(any(feature = "websocket", feature = "http"))]
 use crate::router::types::{BoxFuture, RouterError};
 #[cfg(any(feature = "websocket", feature = "http"))]
@@ -136,4 +136,37 @@ where
             Err(error) => return Err(error),
         }
     }
+}
+
+// ! no bind of port 0 is given a port below every system's ephemeral range (RFC 6335 §6): a test
+// that probes its server's port once it stopped starts it on one drawn here, or another test's
+// listener may take that port meanwhile
+/// A port below the ephemeral range, free on both loopbacks as it is drawn, let go at once, as the
+/// C# side's `NonEphemeralPorts.Drawn` and the TypeScript side's `drawnNonEphemeral` draw it.
+#[cfg(any(feature = "websocket", feature = "http"))]
+pub(crate) fn drawn_non_ephemeral() -> io::Result<u16> {
+    let mut last = io::Error::other("no port drawn");
+
+    for _ in 0..64 {
+        let mut drawn = [0_u8; 2];
+
+        getrandom::fill(&mut drawn).map_err(io::Error::other)?;
+
+        let port = 20_000_u16.saturating_add(u16::from_be_bytes(drawn) % 10_000);
+        let taken = bound(SocketAddr::from((Ipv4Addr::LOCALHOST, port))).and_then(|_ipv4| {
+            match bound(SocketAddr::from((Ipv6Addr::LOCALHOST, port))) {
+                // * a machine without the IPv6 loopback: free where it has one
+                Err(error) if is_absent(&error) => Ok(()),
+                other => other.map(drop),
+            }
+        });
+
+        match taken {
+            Ok(()) => return Ok(port),
+            // * taken on one loopback or the other: another draw
+            Err(error) => last = error,
+        }
+    }
+
+    Err(last)
 }

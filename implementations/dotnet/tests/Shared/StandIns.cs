@@ -105,6 +105,51 @@ internal sealed class ClosedPort : IDisposable
     }
 }
 
+// ! ports below every system's ephemeral range (RFC 6335 §6), which no bind of port 0 is given: a
+// test that probes a port once its listener let it go draws it here, or another test's bind of port
+// 0 may take that port meanwhile, and its probe reaches that test's listener
+/// <summary>
+/// The ports below the ephemeral range, as the TypeScript side's <c>drawnNonEphemeral</c> and the
+/// Rust side's <c>drawn_non_ephemeral</c> draw them.
+/// </summary>
+internal static class NonEphemeralPorts
+{
+    private const int First = 20_000;
+    private const int Count = 10_000;
+
+    /// <summary>A port below the ephemeral range, free on both loopbacks as it is drawn, let go at once.</summary>
+    public static int Drawn()
+    {
+        for (var attempt = 0; ; attempt += 1)
+        {
+            var port = First + Random.Shared.Next(Count);
+
+            try
+            {
+                using var v4 = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
+                using var v6 = new Socket(AddressFamily.InterNetworkV6, SocketType.Stream, ProtocolType.Tcp) { DualMode = false };
+
+                v4.Bind(new IPEndPoint(IPAddress.Loopback, port));
+
+                try
+                {
+                    v6.Bind(new IPEndPoint(IPAddress.IPv6Loopback, port));
+                }
+                catch (SocketException error) when (error.SocketErrorCode is SocketError.AddressNotAvailable or SocketError.AddressFamilyNotSupported)
+                {
+                    // * a machine without the IPv6 loopback: free where it has one
+                }
+
+                return port;
+            }
+            catch (SocketException) when (attempt < 64)
+            {
+                // taken on one loopback or the other: another draw
+            }
+        }
+    }
+}
+
 /// <summary>
 /// A resolver that stands in for the platform's, <see cref="HappyEyeballs.PlatformResolve"/>, until
 /// disposed: it answers every name with 192.0.2.7 of TEST-NET-1 (RFC 5737), which no host answers,
