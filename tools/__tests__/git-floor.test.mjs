@@ -22,7 +22,7 @@ describe('the Git floor', () => {
     }
   });
 
-  test('an older or unreadable version names the found version, floor and upgrade command', () => {
+  test('an older or unreadable version names the version found and the floor', () => {
     for (const version of ['2.55.9', '2.9.0', '1.99.0', 'unreadable']) {
       assert.throws(
         () => {
@@ -31,13 +31,13 @@ describe('the Git floor', () => {
           });
         },
         {
-          message: `Git 2.56 or newer is required; found git version ${version}. Upgrade Git (Git for Windows: winget upgrade --id Git.Git).`,
+          message: `Git 2.56 or newer is required; found git version ${version}.`,
         }
       );
     }
   });
 
-  test('a missing or failed Git command refuses with its reason and an upgrade command', () => {
+  test('a missing or failed Git command refuses with its reason', () => {
     for (const result of [
       { status: null, error: new Error('spawn git ENOENT') },
       { status: 1, stderr: 'cannot run git' },
@@ -47,7 +47,7 @@ describe('the Git floor', () => {
         requireGitFloor(() => {
           return result;
         });
-      }, /Git 2\.56 or newer is required; found .+\. Upgrade Git \(Git for Windows: winget upgrade --id Git\.Git\)\./);
+      }, /Git 2\.56 or newer is required; found .+\.$/);
     }
   });
 });

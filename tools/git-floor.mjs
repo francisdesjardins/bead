@@ -2,7 +2,7 @@ import { spawnSync } from 'node:child_process';
 
 export const GIT_FLOOR = '2.56';
 
-// the tooling's Git floor, with the installed version and an upgrade command on refusal
+// the tooling's Git floor, refused with the version found
 export const requireGitFloor = (run = spawnSync) => {
   const result = run('git', ['--version'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
   const found =
@@ -16,8 +16,6 @@ export const requireGitFloor = (run = spawnSync) => {
     Number(version[1]) < major ||
     (Number(version[1]) === major && Number(version[2]) < minor)
   ) {
-    throw new Error(
-      `Git ${GIT_FLOOR} or newer is required; found ${found}. Upgrade Git (Git for Windows: winget upgrade --id Git.Git).`
-    );
+    throw new Error(`Git ${GIT_FLOOR} or newer is required; found ${found}.`);
   }
 };

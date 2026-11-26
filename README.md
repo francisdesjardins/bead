@@ -1029,8 +1029,7 @@ against each server.
 ## Repository checks
 
 A clone needs Git 2.56 or newer for the repository's tools. CI's runners meet this floor.
-`tools/git-floor.mjs` holds that floor; `flow.mjs` checks it first. On Git for Windows,
-`winget upgrade --id Git.Git` upgrades Git.
+`tools/git-floor.mjs` holds that floor; `flow.mjs` checks it first.
 
 - `node tools/check-commits.mjs <range>`: every commit subject in the range is a Conventional
   Commit; merges are left out. With `--message <file>`, the message git is about to record, which

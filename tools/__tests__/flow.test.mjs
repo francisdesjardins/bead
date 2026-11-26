@@ -196,8 +196,7 @@ describe('refusals', () => {
       syncBuiltinESMExports();
       try {
         await assert.rejects(run(fixture, { gh, dryRun }).promise, {
-          message:
-            'Git 2.56 or newer is required; found git version 2.55.9.windows.1. Upgrade Git (Git for Windows: winget upgrade --id Git.Git).',
+          message: 'Git 2.56 or newer is required; found git version 2.55.9.windows.1.',
         });
       } finally {
         replaced.mock.restore();
