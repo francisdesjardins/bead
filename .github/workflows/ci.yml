@@ -452,7 +452,7 @@ jobs:
           key: rust-build-ubuntu-26.04-${{ hashFiles('implementations/rust/Cargo.lock', 'implementations/rust/rust-toolchain.toml') }}
           restore-keys: rust-build-ubuntu-26.04-
       # cargo-deny's prebuilt release, checked by its SHA-256 against the action's manifest
-      - uses: taiki-e/install-action@ab49d3c64680143e184118bed66a46419fc15519 # v2.90.5
+      - uses: taiki-e/install-action@75a7c0f87bd666af3cdb75c5b9e9d03ab6044e6f # v2.90.6
         with:
           tool: cargo-deny@0.20.2
       - run: cargo fmt --all -- --check
@@ -590,7 +590,7 @@ jobs:
           key: rust-coverage-ubuntu-26.04-${{ hashFiles('implementations/rust/Cargo.lock', 'implementations/rust/rust-toolchain.toml') }}
           restore-keys: rust-coverage-ubuntu-26.04-
       # cargo-llvm-cov's prebuilt release, checked by its SHA-256 against the action's manifest
-      - uses: taiki-e/install-action@ab49d3c64680143e184118bed66a46419fc15519 # v2.90.5
+      - uses: taiki-e/install-action@75a7c0f87bd666af3cdb75c5b9e9d03ab6044e6f # v2.90.6
         with:
           tool: cargo-llvm-cov@0.9.1
       # the unit tests, a module's tests.rs and its tests/ folder, the test kit, the code beadc
