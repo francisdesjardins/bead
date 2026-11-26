@@ -610,7 +610,7 @@ public sealed partial class RouterServerTests : IDisposable
     }
 
     [Fact]
-    public void Runs_on_its_transport_s_clock_and_refuses_another()
+    public async Task Runs_on_its_transport_s_clock_and_refuses_another()
     {
         Start();
 
@@ -622,6 +622,16 @@ public sealed partial class RouterServerTests : IDisposable
             Assert.Throws<ArgumentException>(() =>
             {
                 return new RouterServer(_transport, new RouterServerOptions { Clock = TimeProvider.System });
+            }).Message);
+
+        // * a transport given none runs on the platform's, and refuses a router given another
+        await using var memory = new MemoryTransportServer();
+
+        Assert.Equal(
+            "a server's router runs on the clock of its transport, the platform's, and was given another, one of its own",
+            Assert.Throws<ArgumentException>(() =>
+            {
+                return new RouterServer(memory, new RouterServerOptions { Clock = _time });
             }).Message);
     }
 

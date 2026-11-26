@@ -277,6 +277,23 @@ public sealed class JoinedServerTransportTests
         Assert.Same(clock, together.Clock);
     }
 
+    // spec 15.14
+    [Fact]
+    public async Task Joins_two_transports_given_no_clock_on_the_platform_s()
+    {
+        await using var participant = new BrokerParticipant(
+            new MemoryBroker().Adapter(new MemoryBrokerAdapterOptions { Id = "ada" }),
+            new BrokerParticipantOptions { Heartbeat = Timeout.InfiniteTimeSpan });
+        await using var joined = new JoinedServerTransport([new MemoryTransportServer(), participant.Server(new BrokerTransportServerOptions { Names = ["interop"] })]);
+
+        Assert.Same(TimeProvider.System, joined.Clock);
+
+        // * a server built over the join runs on it, refusing nothing
+        await using var server = new Server<string>(joined);
+
+        Assert.Same(TimeProvider.System, server.Router.Clock);
+    }
+
     [Fact]
     public async Task Stops_every_transport_it_joined_and_sums_their_gauges()
     {
