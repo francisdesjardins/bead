@@ -2,7 +2,7 @@
 
 // dependencies
 
-import { PLATFORM_CLOCK, type TimeoutId } from '../shared/clock';
+import type { IClock, TimeoutId } from '../shared/clock';
 import { GenericError, ProgrammerError } from '../shared/errors';
 
 // interfaces
@@ -206,12 +206,13 @@ export const answerBeforeClose = (server: IHeadBoundServerLike & IClientErrorSer
  * Closes `socket` in stages once the answer written on it ends (RFC 9112 §9.6): Node ends its write
  * side, and destroys it once that side is flushed, which resets a client still sending and may
  * erase the answer it has not read yet. So it reads on, dropping what comes, until its client
- * closes or {@link LINGER_MILLISECONDS} pass, on the platform's clock, which bounds the platform's
- * own close.
+ * closes or {@link LINGER_MILLISECONDS} pass, on `clock`, its stack's platform clock, which bounds
+ * the platform's own close.
  */
 export const lingerOn = (
   socket: ILingeringSocketLike,
-  response: { on(event: 'finish', listener: () => void): unknown }
+  response: { on(event: 'finish', listener: () => void): unknown },
+  { clock }: { clock: IClock }
 ): void => {
   response.on('finish', () => {
     // ! Node armed the socket's destroy on its `finish`, once as it is written; `once` keeps the
@@ -219,7 +220,7 @@ export const lingerOn = (
     // oxlint-disable-next-line typescript/unbound-method -- found by identity, never called here
     socket.removeListener('finish', socket.destroy);
 
-    const timer = PLATFORM_CLOCK.setTimeout(() => {
+    const timer = clock.setTimeout(() => {
       socket.destroy();
     }, LINGER_MILLISECONDS);
 
@@ -229,7 +230,7 @@ export const lingerOn = (
       socket.destroy();
     });
     socket.once('close', () => {
-      PLATFORM_CLOCK.clearTimeout(timer);
+      clock.clearTimeout(timer);
     });
   });
 };
@@ -241,19 +242,20 @@ export const lingerOn = (
  * `MinResponseDataRate` (spec 15.12): each envelope of _S_ bytes handed moves the deadline to the
  * later of now plus the longer of `sendGracePeriod` and _S_ at `minimumSendBytesPerSecond`, and the
  * deadline before plus that time. While `unsent` says something waits, it is judged each second,
- * and `late` hears once it waits past its deadline; nothing waiting, no deadline runs. Its timer is
- * the platform's, whatever clock the server is given, since it bounds what the platform's socket
- * does, as the heartbeat does (decision 0011); it keeps no process alive. A rate of 0 holds none.
+ * and `late` hears once it waits past its deadline; nothing waiting, no deadline runs. Its timer
+ * runs on `clock`, its stack's platform clock, whatever clock the server is given, since it bounds
+ * what the platform's socket does, as the heartbeat does (decision 0011); it keeps no process
+ * alive. A rate of 0 holds none.
  */
 export const createSendPace = (
-  { late, unsent }: { late: () => void; unsent: () => number },
+  { clock, late, unsent }: { clock: IClock; late: () => void; unsent: () => number },
   { minimumSendBytesPerSecond, sendGracePeriod }: ISendPaceOptions
 ): ISendPace => {
   let deadline: number | undefined;
   let timer: TimeoutId | undefined;
 
   const stop = (): void => {
-    PLATFORM_CLOCK.clearInterval(timer);
+    clock.clearInterval(timer);
     timer = undefined;
     deadline = undefined;
   };
@@ -263,7 +265,7 @@ export const createSendPace = (
       return (stop(), undefined);
     }
 
-    if (deadline !== undefined && PLATFORM_CLOCK.performance.now() > deadline) {
+    if (deadline !== undefined && clock.performance.now() > deadline) {
       stop();
       late();
     }
@@ -277,14 +279,14 @@ export const createSendPace = (
         return;
       }
 
-      const now = PLATFORM_CLOCK.performance.now();
+      const now = clock.performance.now();
       const takes = (bytes * 1_000) / minimumSendBytesPerSecond;
       const earliest = now + Math.max(sendGracePeriod, takes);
 
       deadline = deadline === undefined ? earliest : Math.max(earliest, deadline + takes);
 
       if (timer === undefined) {
-        timer = PLATFORM_CLOCK.setInterval(check, CHECK_MILLISECONDS);
+        timer = clock.setInterval(check, CHECK_MILLISECONDS);
         (timer as { unref?: () => unknown }).unref?.();
       }
     },

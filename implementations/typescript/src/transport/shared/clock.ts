@@ -46,6 +46,14 @@ export const LONGEST_TIMER = 2 ** 31 - 1;
 /** The platform's clock: the globals themselves, the one place Bead names them. */
 export const PLATFORM_CLOCK: IClock = globalThis;
 
+/**
+ * The key a test replaces a stack's platform clock by: the clock Bead's own bounds of a platform
+ * run on, the globals unless replaced. No entry of the package exports it.
+ *
+ * @internal
+ */
+export const PLATFORM: unique symbol = Symbol('bead.platform');
+
 // helpers
 
 // whether every platform's timers hold `duration` alike once rounded: from 1 to the ceiling, a

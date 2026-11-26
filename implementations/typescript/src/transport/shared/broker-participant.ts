@@ -33,7 +33,7 @@ import {
   partsOf,
   SEQUENCE_VERDICTS,
 } from './broker-sequence';
-import { assertHeldFinite, type IClock, PLATFORM_CLOCK } from './clock';
+import { assertHeldFinite, type IClock, PLATFORM, PLATFORM_CLOCK } from './clock';
 import { BROKER_DELIVERIES, BROKER_PUBLISHED } from './constants';
 import { createEmitter, tellError } from './emitter';
 import {
@@ -103,6 +103,13 @@ export type {
 // interfaces
 
 export interface IBrokerParticipantOptions {
+  /**
+   * The clock its own bound of its platform runs on, its heartbeat, and its `clock` when none is
+   * given: the platform's, which only a test replaces.
+   *
+   * @internal
+   */
+  readonly [PLATFORM]?: IClock | undefined;
   /** Its one link to its broker: the adapter of that broker's client. */
   adapter: IBrokerAdapter;
   /** Announces this participant to the page’s hook unless false; independent of each client’s option. */
@@ -115,7 +122,7 @@ export interface IBrokerParticipantOptions {
   bodyGracePeriod?: number | undefined;
   /**
    * The clock its parts' rate and its link's reconnection run on, and its transports'; the
-   * platform's when not given. Its heartbeat runs on the platform's timer whatever it is.
+   * platform's when not given. Its heartbeat runs on its platform's clock whatever it is.
    */
   clock?: IClock | undefined;
   /**
@@ -478,7 +485,6 @@ export const portOf = (participant: IBrokerParticipant): IBrokerParticipantPort 
 export const createBrokerParticipant = (options: IBrokerParticipantOptions): IBrokerParticipant => {
   const {
     adapter,
-    clock = PLATFORM_CLOCK,
     heldBytesBudget = HELD_BYTES_BUDGET,
     maximumEnvelopePartsBytes = MAXIMUM_ENVELOPE_PARTS_BYTES,
     maximumHeldEnvelopeBytes,
@@ -488,6 +494,10 @@ export const createBrokerParticipant = (options: IBrokerParticipantOptions): IBr
     requireDelivery,
     root = ROOT,
   } = options;
+  // * its own bound of its platform runs on its platform's clock, and so does a participant given
+  // none
+  const platform = options[PLATFORM] ?? PLATFORM_CLOCK;
+  const clock = options.clock ?? platform;
   const { id } = adapter;
 
   if (!isToken(id)) {
@@ -962,14 +972,18 @@ export const createBrokerParticipant = (options: IBrokerParticipantOptions): IBr
       beat =
         heartbeat === Infinity
           ? undefined
-          : createSilenceHeartbeat(heartbeat, {
-              drop: () => {
-                void closeWith(CloseCode.UNANSWERED);
+          : createSilenceHeartbeat(
+              heartbeat,
+              {
+                drop: () => {
+                  void closeWith(CloseCode.UNANSWERED);
+                },
+                ping: () => {
+                  sendParcel({ kind: ParcelKind.PING });
+                },
               },
-              ping: () => {
-                sendParcel({ kind: ParcelKind.PING });
-              },
-            });
+              { clock: platform }
+            );
     };
 
     // an envelope come whole handed on to its owner; or, while its router paused it or anything is

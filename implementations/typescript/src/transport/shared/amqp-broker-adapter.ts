@@ -30,7 +30,15 @@ import {
   queueAddressOf,
   topicOf,
 } from './amqp-messages';
-import { assertHeldFinite, assertHeldWithin, LONGEST_TIMER, PLATFORM_CLOCK } from './clock';
+import {
+  assertHeldFinite,
+  assertHeldWithin,
+  type IClock,
+  LONGEST_TIMER,
+  PLATFORM,
+  PLATFORM_CLOCK,
+  type TimeoutId,
+} from './clock';
 import { BROKER_DELIVERIES, BROKER_PUBLISHED, TRANSPORT_AMQP } from './constants';
 import { createEmitter } from './emitter';
 import { byteCountOf, GenericError, ProgrammerError, toCancelError, toError } from './errors';
@@ -62,6 +70,13 @@ export type {
 // interfaces
 
 export interface IAmqpBrokerAdapterOptions {
+  /**
+   * The clock its own bounds of its platform run on, its waits and a localhost name's race: the
+   * platform's, which only a test replaces.
+   *
+   * @internal
+   */
+  readonly [PLATFORM]?: IClock | undefined;
   /**
    * How long its start waits for its password, where it asks its provider, its broker's OPEN and its
    * sessions, its inbox's subscription for its declaration, its binding and its receiver, and its
@@ -431,6 +446,8 @@ export const createAmqpBrokerAdapter = (options: IAmqpBrokerAdapterOptions): IAm
     url,
     virtualHost,
   } = options;
+  // * its own bounds of its platform run on its platform's clock
+  const platform = options[PLATFORM] ?? PLATFORM_CLOCK;
   // * a tls of no member is none
   const tls = tlsOf(options.tls);
   const idleTimeout = assertHeldWithin('idleTimeout', options.idleTimeout ?? IDLE_TIMEOUT, {
@@ -592,10 +609,7 @@ export const createAmqpBrokerAdapter = (options: IAmqpBrokerAdapterOptions): IAm
     const { connection } = incarnation;
     // * one bounded shutdown: what does not come within it is not waited for
     const bounded = Promise.withResolvers<void>();
-    const timer = PLATFORM_CLOCK.setTimeout(
-      bounded.resolve,
-      Math.min(connectTimeout, LONGEST_TIMER)
-    );
+    const timer = platform.setTimeout(bounded.resolve, Math.min(connectTimeout, LONGEST_TIMER));
     const gone = new Promise<void>((resolve) => {
       connection.once('connection_close', () => {
         resolve();
@@ -696,7 +710,7 @@ export const createAmqpBrokerAdapter = (options: IAmqpBrokerAdapterOptions): IAm
       await Promise.race([bounded.promise, gone]);
     }
 
-    PLATFORM_CLOCK.clearTimeout(timer);
+    platform.clearTimeout(timer);
     abandon(connection);
   };
 
@@ -1159,11 +1173,11 @@ export const createAmqpBrokerAdapter = (options: IAmqpBrokerAdapterOptions): IAm
     const retiring = (error: Error): void => {
       retire(incarnation, new GenericError(`the link of ${id} was retired: ${error.message}`));
     };
-    let timer: ReturnType<typeof PLATFORM_CLOCK.setTimeout> | undefined;
+    let timer: TimeoutId | undefined;
 
     return awaited<void>(incarnation, {
       begin: ({ reject, resolve }) => {
-        timer = PLATFORM_CLOCK.setTimeout(
+        timer = platform.setTimeout(
           () => {
             const error = new GenericError(
               `the inbox of ${id} was not held within ${String(connectTimeout)} ms`
@@ -1220,7 +1234,7 @@ export const createAmqpBrokerAdapter = (options: IAmqpBrokerAdapterOptions): IAm
       onAbort: retiring,
       signal,
     }).finally(() => {
-      PLATFORM_CLOCK.clearTimeout(timer);
+      platform.clearTimeout(timer);
     });
   };
 
@@ -1345,7 +1359,7 @@ export const createAmqpBrokerAdapter = (options: IAmqpBrokerAdapterOptions): IAm
     { losing, receiving }: { losing: { lost?: Error | undefined }; receiving: IReceiving }
   ): Promise<void> => {
     const key = topicOf(receiving.topic);
-    let timer: ReturnType<typeof PLATFORM_CLOCK.setTimeout> | undefined;
+    let timer: TimeoutId | undefined;
 
     return awaited<void>(incarnation, {
       begin: ({ reject, resolve }) => {
@@ -1371,7 +1385,7 @@ export const createAmqpBrokerAdapter = (options: IAmqpBrokerAdapterOptions): IAm
         // ! what it handed on is settled before its DETACH goes: one detached unsettled goes back
         // to its queue, and an OPEN whose connection its server took and has since closed would be
         // answered anew, its pair gone
-        timer = PLATFORM_CLOCK.setTimeout(
+        timer = platform.setTimeout(
           () => {
             losing.lost = new GenericError(
               `the link of ${id} was lost: it let the name ${key} go within no ${String(connectTimeout)} ms, its connectTimeout`
@@ -1390,7 +1404,7 @@ export const createAmqpBrokerAdapter = (options: IAmqpBrokerAdapterOptions): IAm
         receiving.drained = detach;
       },
     }).finally(() => {
-      PLATFORM_CLOCK.clearTimeout(timer);
+      platform.clearTimeout(timer);
     });
   };
 
@@ -1431,7 +1445,7 @@ export const createAmqpBrokerAdapter = (options: IAmqpBrokerAdapterOptions): IAm
         }
 
         isSettled = true;
-        PLATFORM_CLOCK.clearTimeout(timer);
+        platform.clearTimeout(timer);
         signal?.removeEventListener('abort', cancel);
         ask.signal.removeEventListener('abort', giveUp);
 
@@ -1445,7 +1459,7 @@ export const createAmqpBrokerAdapter = (options: IAmqpBrokerAdapterOptions): IAm
       const cancel = (): void => {
         ask.abort(toCancelError(signal as AbortSignal));
       };
-      const timer = PLATFORM_CLOCK.setTimeout(
+      const timer = platform.setTimeout(
         () => {
           ask.abort(
             new GenericError(
@@ -1500,7 +1514,7 @@ export const createAmqpBrokerAdapter = (options: IAmqpBrokerAdapterOptions): IAm
   }): Promise<void> => {
     const asked = starts;
     // * one connectTimeout from its start's call: its password's ask, then its OPEN and sessions
-    const deadline = PLATFORM_CLOCK.performance.now() + connectTimeout;
+    const deadline = platform.performance.now() + connectTimeout;
     const secret =
       passwordProvider === undefined
         ? password
@@ -1511,7 +1525,7 @@ export const createAmqpBrokerAdapter = (options: IAmqpBrokerAdapterOptions): IAm
     }
 
     const leftOf = (): number => {
-      return Math.max(0, Math.min(deadline - PLATFORM_CLOCK.performance.now(), LONGEST_TIMER));
+      return Math.max(0, Math.min(deadline - platform.performance.now(), LONGEST_TIMER));
     };
     // * a localhost name raced on the loopback before its connection is built, within its start's
     // connectTimeout, given up by its start's signal or its stop
@@ -1520,6 +1534,7 @@ export const createAmqpBrokerAdapter = (options: IAmqpBrokerAdapterOptions): IAm
     if (isLocalhostName(host)) {
       try {
         raced = await raceLoopback(port, {
+          clock: platform,
           signal: signal === undefined ? ask.signal : AbortSignal.any([ask.signal, signal]),
           timeout: leftOf(),
         });
@@ -1607,7 +1622,7 @@ export const createAmqpBrokerAdapter = (options: IAmqpBrokerAdapterOptions): IAm
 
     try {
       await new Promise<void>((resolve, reject) => {
-        const timer = PLATFORM_CLOCK.setTimeout(() => {
+        const timer = platform.setTimeout(() => {
           fail(
             new GenericError(
               `the link of ${id} had no OPEN and no sessions within ${String(connectTimeout)} ms, its connectTimeout`
@@ -1621,7 +1636,7 @@ export const createAmqpBrokerAdapter = (options: IAmqpBrokerAdapterOptions): IAm
           }
 
           isSettled = true;
-          PLATFORM_CLOCK.clearTimeout(timer);
+          platform.clearTimeout(timer);
           signal?.removeEventListener('abort', abort);
           held.failures.delete(fail);
           reject(error);
@@ -1701,7 +1716,7 @@ export const createAmqpBrokerAdapter = (options: IAmqpBrokerAdapterOptions): IAm
               }
 
               isSettled = true;
-              PLATFORM_CLOCK.clearTimeout(timer);
+              platform.clearTimeout(timer);
               signal?.removeEventListener('abort', abort);
               held.failures.delete(fail);
               resolve();
@@ -1893,7 +1908,8 @@ export const createAmqpBrokerAdapter = (options: IAmqpBrokerAdapterOptions): IAm
         // ! its provider's signal aborted once its start ended, linked or not, in a later turn,
         // so that its listeners run outside the start's own stack
         if (passwordProvider !== undefined) {
-          PLATFORM_CLOCK.setTimeout(() => {
+          // oxlint-disable-next-line no-restricted-properties -- a deferral to the next turn, which no clock times
+          globalThis.setTimeout(() => {
             ask.abort();
           }, 0);
         }
@@ -1953,7 +1969,7 @@ export const createAmqpBrokerAdapter = (options: IAmqpBrokerAdapterOptions): IAm
       if (topic[1] === 'i') {
         const inbox = incarnation.inbox;
         const given = new AbortController();
-        let timer: ReturnType<typeof PLATFORM_CLOCK.setTimeout> | undefined;
+        let timer: TimeoutId | undefined;
 
         if (inbox !== undefined) {
           inbox.isDeleting = true;
@@ -1961,7 +1977,7 @@ export const createAmqpBrokerAdapter = (options: IAmqpBrokerAdapterOptions): IAm
 
         return awaited<void>(incarnation, {
           begin: ({ reject, resolve }) => {
-            timer = PLATFORM_CLOCK.setTimeout(
+            timer = platform.setTimeout(
               () => {
                 reject(
                   new GenericError(
@@ -1993,7 +2009,7 @@ export const createAmqpBrokerAdapter = (options: IAmqpBrokerAdapterOptions): IAm
             );
           },
         }).finally(() => {
-          PLATFORM_CLOCK.clearTimeout(timer);
+          platform.clearTimeout(timer);
         });
       }
 

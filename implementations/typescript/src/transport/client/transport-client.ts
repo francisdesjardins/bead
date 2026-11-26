@@ -94,9 +94,12 @@ export type RECONNECT_DEFAULTS = typeof RECONNECT_DEFAULTS;
 
 // constants
 
-/** What an omitted transport option resolves to. */
+/**
+ * What an omitted transport option resolves to: none of its own, its `clock` its transport's
+ * platform clock, which each transport resolves where it starts.
+ */
 export const DEFAULTS = (): ITransportClientOptions => {
-  return { clock: PLATFORM_CLOCK };
+  return {};
 };
 
 /** What an omitted disconnect option resolves to. */

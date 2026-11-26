@@ -1,6 +1,6 @@
 // dependencies
 
-import type { IClock } from '../shared/clock';
+import type { IClock, PLATFORM } from '../shared/clock';
 import type { CLOSE_EVENT, ERROR_EVENT, MESSAGE_EVENT } from '../shared/constants';
 import type {
   Data,
@@ -470,6 +470,13 @@ export interface IWebSocketTransportClientConnectOptions extends ITransportClien
 
 export interface IWebSocketTransportClientOptions extends ITransportClientOptions {
   /**
+   * The clock its own bounds of its platform run on, its heartbeat and a localhost name's race, and
+   * its `clock` when none is given: the platform's, which only a test replaces.
+   *
+   * @internal
+   */
+  readonly [PLATFORM]?: IClock | undefined;
+  /**
    * Defaults to {@link TRANSPORT_WEBSOCKET_BINARYTYPE}. `ws`'s `'fragments'` is left out: it delivers
    * an array of buffers, which is not a {@link Data}. `'nodebuffer'` needs `ws`; the global
    * WebSocket ignores it and keeps delivering Blobs.
@@ -585,6 +592,13 @@ export interface IHTTPTransportClientConnectOptions extends ITransportClientAddr
 }
 
 export interface IHTTPTransportClientOptions extends ITransportClientOptions {
+  /**
+   * The clock its own bounds of its platform run on, its disconnect's `DELETE` and a localhost
+   * name's race, and its `clock` when none is given: the platform's, which only a test replaces.
+   *
+   * @internal
+   */
+  readonly [PLATFORM]?: IClock | undefined;
   /**
    * Milliseconds from its first send a client sends again an envelope that is no request, refused
    * `busy` — 429, or 503 — once its `Retry-After` passed; still refused past them, its exchange is

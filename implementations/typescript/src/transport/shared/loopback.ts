@@ -3,7 +3,7 @@
 // dependencies
 
 import type { Socket } from 'node:net';
-import { type IClock, LONGEST_TIMER, PLATFORM_CLOCK, type TimeoutId } from './clock';
+import { type IClock, LONGEST_TIMER, type TimeoutId } from './clock';
 import { toError } from './errors';
 import { noop } from './noop';
 import { isLoopbackHost } from './secure';
@@ -24,8 +24,8 @@ export interface IRaceLoopbackOptions {
    * 64 KiB as undici's own, by default.
    */
   attempt?: ((address: string, port: number) => Socket) | undefined;
-  /** The clock its attempt delay and its timeout run on: the platform's by default. */
-  clock?: IClock | undefined;
+  /** The clock its attempt delay and its timeout run on: its stack's platform clock. */
+  clock: IClock;
   /** Gives the race up: every attempt ended, the race rejected with the signal's reason. */
   signal?: AbortSignal | null | undefined;
   /**
@@ -209,7 +209,7 @@ const everyFailureOf = (errors: readonly Error[]): AggregateError => {
  */
 export const raceLoopback = (
   port: number,
-  { attempt = connectOf, clock = PLATFORM_CLOCK, signal, timeout }: IRaceLoopbackOptions
+  { attempt = connectOf, clock, signal, timeout }: IRaceLoopbackOptions
 ): Promise<Socket> => {
   return new Promise<Socket>((resolve, reject) => {
     if (signal?.aborted === true) {
@@ -331,16 +331,21 @@ export const raceLoopback = (
 
 /**
  * `http`'s `createConnection` in its callback form, for `ws`, to a localhost name `host`: it races
- * the loopback by {@link raceLoopback}, bounded by `timeout` and `signal`, of which `ws` hands none,
- * then, under `wss`, lays TLS over the winner with the options `ws` handed it, its TLS options
- * among them, and the server name `ws` would set, none for an IP literal.
+ * the loopback by {@link raceLoopback}, on `clock`, its stack's platform clock, bounded by
+ * `timeout` and `signal`, of which `ws` hands none, then, under `wss`, lays TLS over the winner
+ * with the options `ws` handed it, its TLS options among them, and the server name `ws` would set,
+ * none for an IP literal.
  */
 export const loopbackCreateConnection = (
   host: string,
-  { signal, timeout }: { signal?: AbortSignal | null | undefined; timeout: number }
+  {
+    clock,
+    signal,
+    timeout,
+  }: { clock: IClock; signal?: AbortSignal | null | undefined; timeout: number }
 ): CreateConnection => {
   return (options, oncreate) => {
-    raceLoopback(Number(options.port), { signal, timeout }).then(
+    raceLoopback(Number(options.port), { clock, signal, timeout }).then(
       (socket) => {
         // ! `ws` gives a `wss` URL's request 443 as its default port, and a `ws` one's 80
         if (options.defaultPort !== 443) {
@@ -386,14 +391,18 @@ export const loopbackCreateConnection = (
 };
 
 /**
- * undici's `connect` function over `undici.buildConnector(tls)`, `tls` last as its options: a host but a localhost name goes to
- * undici's own connector unchanged. A localhost name races the loopback by {@link raceLoopback},
- * bounded by {@link LOOPBACK_CONNECT_TIMEOUT}. Under `https:`, the winner goes to that same connector
- * as its `httpSocket`, so its ALPN, its server name, its session cache, its keep-alive, its
- * `setNoDelay` and its connect timer hold over the TLS handshake; in the clear, the winner takes
- * undici's keep-alive and `setNoDelay` here.
+ * undici's `connect` function over `undici.buildConnector(tls)`: a host but a localhost name goes
+ * to undici's own connector unchanged. A localhost name races the loopback by
+ * {@link raceLoopback}, on `clock`, its stack's platform clock, bounded by
+ * {@link LOOPBACK_CONNECT_TIMEOUT}. Under `https:`, the winner goes to that same connector as its
+ * `httpSocket`, so its ALPN, its server name, its session cache, its keep-alive, its `setNoDelay`
+ * and its connect timer hold over the TLS handshake; in the clear, the winner takes undici's
+ * keep-alive and `setNoDelay` here.
  */
-export const loopbackConnector = (undici: IUndici, tls: INodeTlsOptions): UndiciConnector => {
+export const loopbackConnector = (
+  undici: IUndici,
+  { clock, tls }: { clock: IClock; tls: INodeTlsOptions }
+): UndiciConnector => {
   const connector = undici.buildConnector(tls);
 
   return (options, callback) => {
@@ -406,7 +415,7 @@ export const loopbackConnector = (undici: IUndici, tls: INodeTlsOptions): Undici
     const isSecure = options.protocol === 'https:';
     const port = options.port === '' ? (isSecure ? 443 : 80) : Number(options.port);
 
-    raceLoopback(port, { timeout: LOOPBACK_CONNECT_TIMEOUT }).then(
+    raceLoopback(port, { clock, timeout: LOOPBACK_CONNECT_TIMEOUT }).then(
       (socket) => {
         if (isSecure) {
           // ! a connector that throws as it is called fails the connect, its socket let go
@@ -548,12 +557,18 @@ export const undiciOf = async (): Promise<IUndici> => {
 
 /**
  * A client's undici and its agent, whose connect, {@link loopbackConnector}, takes `tls` and races a
- * localhost name on the loopback, so that one agent serves a host on the loopback and one under TLS
- * alike.
+ * localhost name on the loopback, on `clock`, its stack's platform clock, so that one agent serves
+ * a host on the loopback and one under TLS alike.
  * Where the package undici does not resolve, it draws none, and the client takes Node's global
  * `fetch` and `WebSocket`, which ask the platform's resolver (spec 13.4).
  */
-export const createUndiciDialer = (tls: INodeTlsOptions): IUndiciDialer => {
+export const createUndiciDialer = ({
+  clock,
+  tls,
+}: {
+  clock: IClock;
+  tls: INodeTlsOptions;
+}): IUndiciDialer => {
   // `null` once undici was found not to resolve, for this client's life
   let undici: IUndici | null | undefined;
   let agent: IUndiciAgent | undefined;
@@ -581,7 +596,7 @@ export const createUndiciDialer = (tls: INodeTlsOptions): IUndiciDialer => {
         return undefined;
       }
 
-      agent ??= new undici.Agent({ connect: loopbackConnector(undici, tls) });
+      agent ??= new undici.Agent({ connect: loopbackConnector(undici, { clock, tls }) });
 
       return { agent, undici };
     },

@@ -15,7 +15,14 @@ import {
   SEQUENCE_HEADER,
   WAIT_HEADER,
 } from '../shared/constants';
-import { assertHeld, assertHeldDelay, LONGEST_TIMER, type TimeoutId } from '../shared/clock';
+import {
+  assertHeld,
+  assertHeldDelay,
+  LONGEST_TIMER,
+  PLATFORM,
+  PLATFORM_CLOCK,
+  type TimeoutId,
+} from '../shared/clock';
 import { createPromise } from '../shared/create-promise';
 import {
   byteCountOf,
@@ -406,7 +413,6 @@ export const createHTTPTransportClient = (
   options?: IHTTPTransportClientOptions
 ): HTTPTransportClient => {
   const {
-    clock,
     exchangeTimeout: givenExchangeTimeout = EXCHANGE_TIMEOUT,
     fetch: givenFetch,
     inactivityTimeout: givenInactivityTimeout = INACTIVITY_TIMEOUT,
@@ -418,6 +424,9 @@ export const createHTTPTransportClient = (
     ...DEFAULTS(),
     ...options,
   };
+  // * its own bounds of its platform run on its platform's clock, and so does a client given none
+  const platform = options?.[PLATFORM] ?? PLATFORM_CLOCK;
+  const clock = options?.clock ?? platform;
   const inactivityTimeout = assertHeld('inactivityTimeout', givenInactivityTimeout);
   const exchangeTimeout = assertHeld('exchangeTimeout', givenExchangeTimeout);
   // 0 is at once: a listen again at once, and a listen the server answers at once, which polls
@@ -432,7 +441,7 @@ export const createHTTPTransportClient = (
   const platformFetch = givenFetch ?? (globalThis.fetch as FetchLike);
   // undici, once an exchange that needs it loaded it, and the client's agent, drawn again after a
   // dispose closed it
-  const dialer = createUndiciDialer(nodeTlsOf(tls));
+  const dialer = createUndiciDialer({ clock: platform, tls: nodeTlsOf(tls) });
 
   // * in Node, no fetch given: a host on the loopback (spec 13.4), and `tls` under `https`, through
   // undici's own fetch and the client's agent, which Node's global fetch takes no dispatcher of;
@@ -992,10 +1001,19 @@ export const createHTTPTransportClient = (
             void release(connection);
           } else {
             // the server ends it first, so what waits there learns it; then what waits here goes. Its
-            // bound is the platform's, on the real clock, as a close handshake's: it bounds the
-            // platform's own exchange with a server that does not answer (decision 0011)
-            // oxlint-disable-next-line no-restricted-properties -- a disconnect's bound is the platform's
-            const signal = AbortSignal.timeout(DISCONNECT_TIMEOUT);
+            // bound runs on its platform's clock, as a close handshake's: it bounds the platform's
+            // own exchange with a server that does not answer (decision 0011)
+            const bound = new AbortController();
+            const timer = platform.setTimeout(() => {
+              // the reason `AbortSignal.timeout` aborts with
+              bound.abort(
+                new DOMException('The operation was aborted due to timeout', 'TimeoutError')
+              );
+            }, DISCONNECT_TIMEOUT);
+            const { signal } = bound;
+
+            // keeping no process alive, where its timer can: a browser's has no `unref`
+            (timer as { unref?: () => unknown }).unref?.();
             try {
               drain(
                 await fetchImpl(connection.url, {
@@ -1008,6 +1026,8 @@ export const createHTTPTransportClient = (
               );
             } catch (reason) {
               failure = executorFailureOf(reason, signal);
+            } finally {
+              platform.clearTimeout(timer);
             }
 
             connection.controller.abort();

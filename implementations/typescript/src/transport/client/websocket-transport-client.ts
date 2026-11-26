@@ -14,7 +14,7 @@ import {
   WS_TOO_MANY_FRAMES_CODE,
   WS_TOO_MANY_FRAMES_MESSAGE,
 } from '../shared/constants';
-import { assertHeld, LONGEST_TIMER } from '../shared/clock';
+import { assertHeld, LONGEST_TIMER, PLATFORM, PLATFORM_CLOCK } from '../shared/clock';
 import { createPromise } from '../shared/create-promise';
 import {
   closedWithOf,
@@ -236,7 +236,6 @@ export const createWebSocketTransportClient = (
 ): WebSocketTransportClient => {
   const {
     binaryType = TRANSPORT_WEBSOCKET_BINARYTYPE,
-    clock,
     closeTimeout: givenCloseTimeout = CLOSE_TIMEOUT,
     heartbeat: givenHeartbeat = HEARTBEAT,
     maxPayload = MAXIMUM_MESSAGE_BYTES,
@@ -246,6 +245,9 @@ export const createWebSocketTransportClient = (
     ...DEFAULTS(),
     ...options,
   };
+  // * its own bounds of its platform run on its platform's clock, and so does a client given none
+  const platform = options?.[PLATFORM] ?? PLATFORM_CLOCK;
+  const clock = options?.clock ?? platform;
   const heartbeat = assertHeartbeat(givenHeartbeat);
 
   // ! never without end: `ws` reads a `maxFragments` of 0 as none
@@ -262,7 +264,7 @@ export const createWebSocketTransportClient = (
   // * in Node, no WebSocket given: a host on the loopback through undici's own WebSocket and the
   // client's agent (spec 13.4), or the global one where undici does not resolve
   const isDefault = options?.WebSocket === undefined;
-  const dialer = createUndiciDialer({});
+  const dialer = createUndiciDialer({ clock: platform, tls: {} });
 
   return createTransportClient<IWebSocketLike, IWebSocketTransportClientConnectOptions>(
     (client, { report, tell }) => {
@@ -316,21 +318,25 @@ export const createWebSocketTransportClient = (
           return undefined;
         }
 
-        const beats = createHeartbeat(heartbeat, {
-          drop: () => {
-            try {
-              socket.terminate?.();
-            } catch (reason) {
-              thrown(reason);
-            }
+        const beats = createHeartbeat(
+          heartbeat,
+          {
+            drop: () => {
+              try {
+                socket.terminate?.();
+              } catch (reason) {
+                thrown(reason);
+              }
+            },
+            // at once, ahead of what the queue holds
+            ping: (data) => {
+              if (socket.readyState === WebSocket.OPEN) {
+                socket.ping?.(data);
+              }
+            },
           },
-          // at once, ahead of what the queue holds
-          ping: (data) => {
-            if (socket.readyState === WebSocket.OPEN) {
-              socket.ping?.(data);
-            }
-          },
-        });
+          { clock: platform }
+        );
 
         raw?.on?.('data', () => {
           beats.heard();
@@ -505,6 +511,7 @@ export const createWebSocketTransportClient = (
                               ...(isWsShaped(WebSocket) && isLocalhostName(host)
                                 ? {
                                     createConnection: loopbackCreateConnection(host, {
+                                      clock: platform,
                                       signal: AbortSignal.any([
                                         attempt.controller.signal,
                                         ...(signal === undefined ? [] : [signal]),

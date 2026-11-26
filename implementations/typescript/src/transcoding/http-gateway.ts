@@ -584,6 +584,8 @@ export const createHTTPGateway = (given: IHTTPGatewayOptions): IHTTPGateway => {
 
   const timeout = assertHeld('timeout', givenTimeout);
   const heartbeat = assertHeld('heartbeat', givenHeartbeat);
+  // * its own bounds of its platform, its pace and its linger, run on the platform's clock
+  const platform = PLATFORM_CLOCK;
   // 15.12's three durations, held once by the policy's own check and in its words, as an HTTP
   // server built on a policy holds them: each given, so each kept
   const { bodyGracePeriod, headersTimeout, sendGracePeriod } = httpPolicyOf({
@@ -752,6 +754,7 @@ export const createHTTPGateway = (given: IHTTPGatewayOptions): IHTTPGateway => {
     };
     const sendPace = createSendPace(
       {
+        clock: platform,
         unsent,
         late: () => {
           dropWriter(
@@ -870,7 +873,10 @@ export const createHTTPGateway = (given: IHTTPGatewayOptions): IHTTPGateway => {
 
     // * a body its request declares and it did not read whole closes its connection, whatever of it
     // came; a request that declares none keeps it (spec 15.12)
-    const closing = exchange.isBodyRead || !carriesContent(request) ? {} : closingOf(exchange);
+    const closing =
+      exchange.isBodyRead || !carriesContent(request)
+        ? {}
+        : closingOf(exchange, { clock: platform });
 
     response.writeHead(status, {
       ...(isPlain

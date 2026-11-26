@@ -1,5 +1,6 @@
 import { setTimeout as sleep } from 'node:timers/promises';
 import { expect, test } from '@playwright/test';
+import { PLATFORM_CLOCK } from '../clock';
 import { ProgrammerError } from '../errors';
 import { assertHeartbeat, createHeartbeat, createSilenceHeartbeat, HEARTBEAT } from '../heartbeat';
 import { createTestClock } from './fixtures';
@@ -245,14 +246,18 @@ test.describe('heartbeat', () => {
   test('pings a connection silent for its heartbeat on the platform’s timer, and drops one that answered nothing by the next', async () => {
     const heard: string[] = [];
     const heartbeatOf = (heartbeat: number) => {
-      return createSilenceHeartbeat(heartbeat, {
-        drop: () => {
-          heard.push('drop');
+      return createSilenceHeartbeat(
+        heartbeat,
+        {
+          drop: () => {
+            heard.push('drop');
+          },
+          ping: () => {
+            heard.push('ping');
+          },
         },
-        ping: () => {
-          heard.push('ping');
-        },
-      });
+        { clock: PLATFORM_CLOCK }
+      );
     };
     // * a connection that hears something every tenth of its heartbeat is never pinged: a margin a
     // loaded run keeps
@@ -290,28 +295,36 @@ test.describe('heartbeat', () => {
     await sleep(300);
     expect(heard).toEqual(['ping']);
 
-    createSilenceHeartbeat(Infinity, {
-      drop: () => {
-        heard.push('drop');
+    createSilenceHeartbeat(
+      Infinity,
+      {
+        drop: () => {
+          heard.push('drop');
+        },
+        ping: () => {
+          heard.push('ping');
+        },
       },
-      ping: () => {
-        heard.push('ping');
-      },
-    });
+      { clock: PLATFORM_CLOCK }
+    );
     await sleep(40);
     expect(heard).toEqual(['ping']);
   });
 
   test('starts a fresh silence after anything heard answers its ping, then drops a ping left unanswered', async () => {
     const heard: string[] = [];
-    const heartbeat = createSilenceHeartbeat(100, {
-      drop: () => {
-        heard.push('drop');
+    const heartbeat = createSilenceHeartbeat(
+      100,
+      {
+        drop: () => {
+          heard.push('drop');
+        },
+        ping: () => {
+          heard.push('ping');
+        },
       },
-      ping: () => {
-        heard.push('ping');
-      },
-    });
+      { clock: PLATFORM_CLOCK }
+    );
 
     try {
       await until(() => {
@@ -331,15 +344,19 @@ test.describe('heartbeat', () => {
   test('beats no more once its own ping stopped it', async () => {
     const heard: string[] = [];
     // * a ping that ends its connection, as one past what may wait for its broker does
-    const heartbeat = createSilenceHeartbeat(100, {
-      drop: () => {
-        heard.push('drop');
+    const heartbeat = createSilenceHeartbeat(
+      100,
+      {
+        drop: () => {
+          heard.push('drop');
+        },
+        ping: () => {
+          heard.push('ping');
+          heartbeat.stop();
+        },
       },
-      ping: () => {
-        heard.push('ping');
-        heartbeat.stop();
-      },
-    });
+      { clock: PLATFORM_CLOCK }
+    );
 
     await until(() => {
       return heard.length === 1;

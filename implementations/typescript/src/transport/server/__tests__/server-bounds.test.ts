@@ -1,8 +1,7 @@
 import { EventEmitter } from 'node:events';
-import { setTimeout as sleep } from 'node:timers/promises';
 import { expect, test } from '@playwright/test';
 import { GenericError, ProgrammerError } from '../../shared/errors';
-import { spyIntervals } from '../../shared/__tests__/fixtures';
+import { createTestClock, hasRef } from '../../shared/__tests__/fixtures';
 import {
   answerBeforeClose,
   assertCount,
@@ -40,11 +39,13 @@ const createLingeringSocket = () => {
 
 test.describe('createSendPace', () => {
   test('holds what waits to its pace: a deadline the longer of its grace and its bytes at its rate, judged each second, late once past it', async () => {
-    using intervals = spyIntervals();
+    // * its timer is its stack's platform clock's, here a test's, stepped from check to check
+    const platform = createTestClock();
     let unsent = 0;
     const lates: number[] = [];
     const pace = createSendPace(
       {
+        clock: platform,
         late: () => {
           lates.push(unsent);
         },
@@ -52,34 +53,40 @@ test.describe('createSendPace', () => {
           return unsent;
         },
       },
-      { minimumSendBytesPerSecond: 1_000, sendGracePeriod: 40 }
+      { minimumSendBytesPerSecond: 1_000, sendGracePeriod: 1_500 }
     );
 
     // 10 bytes take 10 ms at its rate: its grace stands
     unsent = 10;
     pace.hand(10);
 
-    const [check] = intervals.armed;
+    const [check] = platform.armed;
 
-    expect([intervals.armed.length, check?.delay, check?.unrefs]).toEqual([1, 1_000, 1]);
+    // judged each second, keeping no process alive
+    expect([platform.armed.length, check?.delay, check && hasRef(check.handle)]).toEqual([
+      1,
+      1_000,
+      false,
+    ]);
 
-    check?.beat();
+    await platform.tickAsync(1_000);
 
     expect(lates).toEqual([]);
 
-    await sleep(60);
-    check?.beat();
+    await platform.tickAsync(1_000);
 
     // late once, and judged no more
-    expect([lates, intervals.cleared]).toEqual([[10], [check]]);
+    expect([lates, platform.cleared]).toEqual([[10], [check?.handle]]);
+    expect(platform.countTimers()).toBe(0);
   });
 
   test('moves its deadline by the time each envelope takes, the later of now and the deadline before, and runs none while nothing waits', async () => {
-    using intervals = spyIntervals();
+    const platform = createTestClock();
     let unsent = 0;
     let isLate = false;
     const pace = createSendPace(
       {
+        clock: platform,
         late: () => {
           isLate = true;
         },
@@ -87,26 +94,25 @@ test.describe('createSendPace', () => {
           return unsent;
         },
       },
-      { minimumSendBytesPerSecond: 1_000, sendGracePeriod: 20 }
+      { minimumSendBytesPerSecond: 80, sendGracePeriod: 20 }
     );
 
-    // two envelopes of 50 bytes: 50 ms each, the second after the first
+    // two envelopes of 50 bytes: 625 ms each, the second after the first, due at 1,250 ms
     unsent = 100;
     pace.hand(50);
     pace.hand(50);
-    await sleep(60);
-    intervals.armed[0]?.beat();
+    await platform.tickAsync(1_000);
 
     expect(isLate).toBe(false);
 
-    await sleep(60);
-    intervals.armed[0]?.beat();
+    await platform.tickAsync(1_000);
 
     expect(isLate).toBe(true);
 
     // nothing waiting, its check stops, and the next envelope starts from now
     const next = createSendPace(
       {
+        clock: platform,
         late: () => {
           throw new Error('nothing waited');
         },
@@ -119,15 +125,17 @@ test.describe('createSendPace', () => {
 
     unsent = 0;
     next.hand(10);
-    intervals.armed[1]?.beat();
+    await platform.tickAsync(1_000);
 
-    expect(intervals.cleared).toContain(intervals.armed[1]);
+    expect(platform.cleared).toContain(platform.armed[1]?.handle);
+    expect(platform.countTimers()).toBe(0);
   });
 
   test('holds none at a rate of 0, and its defaults are Kestrel’s, 240 bytes a second past 5 s', () => {
-    using intervals = spyIntervals();
+    const platform = createTestClock();
     const pace = createSendPace(
       {
+        clock: platform,
         late: () => {
           throw new Error('no pace held');
         },
@@ -140,7 +148,7 @@ test.describe('createSendPace', () => {
 
     pace.hand(1_000_000);
 
-    expect(intervals.armed).toEqual([]);
+    expect(platform.armed).toEqual([]);
     expect([MINIMUM_SEND_BYTES_PER_SECOND, SEND_GRACE_PERIOD, HEADERS_TIMEOUT]).toEqual([
       240, 5_000, 30_000,
     ]);
@@ -268,7 +276,7 @@ test.describe('lingerOn', () => {
     const socket = createLingeringSocket();
     const response = new EventEmitter();
 
-    lingerOn(socket, response);
+    lingerOn(socket, response, { clock: createTestClock() });
     response.emit('finish');
     // its write side flushed: Node would destroy it now
     socket.emit('finish');
@@ -282,27 +290,27 @@ test.describe('lingerOn', () => {
   });
 
   test('destroys a socket whose client never ends it after 2 s, on the platform’s clock', async () => {
-    const realSetTimeout = globalThis.setTimeout;
-    const delays: number[] = [];
+    // * its timer is its stack's platform clock's, here a test's, stepped to its due
+    const platform = createTestClock();
+    const socket = createLingeringSocket();
+    const response = new EventEmitter();
 
-    // the platform's own timer, read for its delay and fired at once
-    globalThis.setTimeout = ((callback: () => void, delay?: number) => {
-      delays.push(delay ?? 0);
+    lingerOn(socket, response, { clock: platform });
+    response.emit('finish');
 
-      return realSetTimeout(callback, 0);
-    }) as typeof globalThis.setTimeout;
+    // armed for 2 s, keeping no process alive
+    expect(
+      platform.armed.map(({ delay, handle }) => {
+        return [delay, hasRef(handle)];
+      })
+    ).toEqual([[2_000, false]]);
 
-    try {
-      const socket = createLingeringSocket();
-      const response = new EventEmitter();
+    await platform.tickAsync(1_999);
 
-      lingerOn(socket, response);
-      response.emit('finish');
-      await sleep(10);
+    expect(socket.destroyed).toBe(0);
 
-      expect([delays, socket.destroyed]).toEqual([[2_000], 1]);
-    } finally {
-      globalThis.setTimeout = realSetTimeout;
-    }
+    await platform.tickAsync(1);
+
+    expect(socket.destroyed).toBe(1);
   });
 });
