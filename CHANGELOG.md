@@ -108,6 +108,11 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - The HTTP gateway refuses a start after its dispose (`the gateway is disposed`) on every side. A stop
   or a dispose that overtakes a start leaves nothing listening. On the C# side, two starts at once no
   longer both listen.
+- The C# MQTT 5 adapter lets a subscription go only once it handed on each message its broker sent
+  before the UNSUBACK, and its participant reads the let-go behind them. MQTTnet hands a PUBLISH on
+  later than the acknowledgements read after it, so a group member that stopped could see its name
+  let go before an OPEN that came first. It then refused that OPEN 503 once its link was stopping,
+  the REFUSE never went, and the client waited out its connect.
 
 ## [0.17.0] - 2026-11-24
 
