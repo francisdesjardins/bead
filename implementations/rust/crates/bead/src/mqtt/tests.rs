@@ -778,39 +778,38 @@ async fn keeps_its_own_keep_alive_under_a_server_keep_alive_of_0_or_longer_than_
 // spec 15.26
 #[tokio::test]
 async fn runs_a_keep_alive_under_a_second_as_its_connect_announces_it_a_whole_second_rounded_up() {
+    use crate::testing::SteppingClock;
+
     let script = script().await;
+    let clock = SteppingClock::new(crate::testing::instants::new_year());
     let mut options = options_of(&script);
 
     options.keep_alive = Some(Duration::from_millis(200));
+    options.clock = Some(Arc::<SteppingClock>::clone(&clock));
 
     let adapter = adapter_of(&options);
     let heard = heard_of(&adapter);
-    let started = Instant::now();
     let link = link_up((&adapter, &script), (&Connack::default(), None)).await;
 
     assert_eq!(link.connect().keep_alive, 1, "its CONNECT's Keep Alive");
-    // * no PINGREQ before the second its CONNECT announced
+
+    // * no PINGREQ before the second its CONNECT announced, on the clock its timers run on
+    until(|| clock.dues().contains(&Duration::from_secs(1))).await;
+    clock.advance(Duration::from_millis(999)).await;
     assert!(
-        link.next(Some(Kind::Pingreq), Duration::from_millis(700))
+        link.next(Some(Kind::Pingreq), Duration::from_millis(100))
             .await
             .is_err(),
-        "no PINGREQ within 700 ms"
+        "no PINGREQ within 999 ms"
     );
-    link.next(Some(Kind::Pingreq), Duration::from_secs(2))
+    clock.advance(Duration::from_millis(1)).await;
+    link.next(Some(Kind::Pingreq), PATIENCE)
         .await
-        .unwrap();
-    assert!(
-        started.elapsed() >= Duration::from_millis(900),
-        "its PINGREQ once a second went"
-    );
-    assert!(
-        started.elapsed() < Duration::from_millis(2_000),
-        "its PINGREQ by 2,000 ms"
-    );
+        .expect("its PINGREQ once a second went");
 
-    // * its PINGRESP awaited half of that second
-    rest(Duration::from_millis(300)).await;
-    assert!(heard.downs().is_empty(), "kept 300 ms on");
+    // * its PINGRESP awaited half of that second, not half of 200 ms
+    clock.advance(Duration::from_millis(499)).await;
+    assert!(heard.downs().is_empty(), "kept 499 ms on");
     link.send(pingresp());
     assert_eq!(link.of(Kind::Pingreq).len(), 1, "one PINGREQ");
     adapter.stop().await;

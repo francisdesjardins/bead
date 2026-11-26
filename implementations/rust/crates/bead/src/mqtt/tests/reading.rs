@@ -210,15 +210,19 @@ async fn loses_its_link_on_a_second_connack_or_a_malformed_packet() {
 // spec 15.26
 #[tokio::test]
 async fn loses_its_link_once_its_pingreq_has_no_pingresp_within_half_its_keep_alive_in_force() {
+    use crate::testing::SteppingClock;
+
     // * its Keep Alive in force 2 seconds in each: its own, the shorter Server Keep Alive, its own
-    // under 0
+    // under 0, on the clock its timers run on
     for (keep_alive, server_keep_alive) in [(2, None), (30, Some(2)), (2, Some(0))] {
         let case =
             format!("a Keep Alive of {keep_alive}, a Server Keep Alive of {server_keep_alive:?}");
         let script = script().await;
+        let clock = SteppingClock::new(crate::testing::instants::new_year());
         let mut options = options_of(&script);
 
         options.keep_alive = Some(Duration::from_secs(keep_alive));
+        options.clock = Some(Arc::<SteppingClock>::clone(&clock));
 
         let adapter = adapter_of(&options);
         let heard = heard_of(&adapter);
@@ -233,29 +237,22 @@ async fn loses_its_link_once_its_pingreq_has_no_pingresp_within_half_its_keep_al
             ),
         )
         .await;
-        let up = Instant::now();
 
-        link.next(Some(Kind::Pingreq), Duration::from_secs(3))
+        until(|| clock.dues().contains(&Duration::from_secs(2))).await;
+        clock.advance(Duration::from_secs(2)).await;
+        link.next(Some(Kind::Pingreq), PATIENCE)
             .await
-            .unwrap();
+            .expect("its PINGREQ at its Keep Alive in force");
 
-        let pinged = Instant::now();
-
-        assert!(
-            up.elapsed() < Duration::from_millis(2_600),
-            "its PINGREQ within its Keep Alive in force: {case}"
-        );
-        rest(Duration::from_millis(700)).await;
+        // * its link lost at half its Keep Alive in force after its PINGREQ, not before
+        clock.advance(Duration::from_millis(999)).await;
         assert!(
             heard.downs().is_empty(),
             "its unanswered PINGREQ waits half its Keep Alive in force: {case}"
         );
         assert!(adapter.is_linked(), "linked: {case}");
+        clock.advance(Duration::from_millis(1)).await;
         until(|| !heard.downs().is_empty()).await;
-        assert!(
-            pinged.elapsed() < Duration::from_millis(1_700),
-            "its link lost within half its Keep Alive in force: {case}"
-        );
         assert_eq!(
             heard.downs(),
             vec![down(false)],
