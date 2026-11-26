@@ -1139,8 +1139,11 @@ A clone needs Git 2.56 or newer for the repository's tools. CI's runners meet th
 - `node tools/ci-scope.mjs --local [<base>]`: the commands of the CI jobs what the branch changes
   reaches, against its merge base with `origin/develop` by default, the working tree included, the
   `commits` job's first, each from its folder; `--gates` leaves out the whole suites, and `--all`
-  gives every job's, for a release and a merge into `develop`. One table maps each path to the jobs
-  that read it, a path no rule names reaching every job; CI's `scope` job applies it.
+  gives every job's, for a release and a merge into `develop`. `--run` takes the same options and
+  prints and runs each command from its folder, with the caller's environment, stopping at the
+  first failure with its exit code and the command named; it exits 0 when every command passes.
+  One table maps each path to the jobs that read it, a path no rule names reaching every job; CI's
+  `scope` job applies it.
 - `node --test "tools/__tests__/*.test.mjs"`: the root's tools' own tests, in Node's runner, each in
   repositories it makes under the system's temporary folder. Those of `check-a11y.mjs` skip,
   saying why, where the TypeScript side or its Chromium is not installed; `BEAD_A11Y_REQUIRED=1`

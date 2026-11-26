@@ -22,6 +22,9 @@
 //   node tools/ci-scope.mjs --local --gates [<base>]  the same without the whole suites, which CI
 //                                                     runs on the pushed branch
 //   node tools/ci-scope.mjs --local --all             every area's commands
+//   node tools/ci-scope.mjs --run [--gates] [--all | <base> [<head>]]
+//                                                     print and run those commands in order,
+//                                                     stopping at the first failure
 //   node tools/ci-scope.mjs --paths [<base> [<head>]] each changed path and the areas it reaches
 //   node tools/ci-scope.mjs --github                  in CI: the areas of the event, to
 //                                                     $GITHUB_OUTPUT as `areas`, a JSON array
@@ -34,10 +37,11 @@
 // everything: `--all` locally, and CI on a push to develop, main, a release or a hotfix branch, by
 // hand, or where the merge base cannot be read.
 //
-// Exit 1 on a job off its scope (--verdict), or on an argument it does not know.
+// Exit 1 on a job off its scope (--verdict), or on an argument it does not know; --run exits with
+// the first failed command's code, or 0 when every command passes. It inherits the environment.
 
 import { appendFileSync } from 'node:fs';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { resolve } from 'node:path';
 
 export const ROOT = resolve(import.meta.dirname, '..');
@@ -1016,49 +1020,90 @@ export const stepsOf = (areas, paths, options = {}) => {
 };
 
 // the steps as lines both bash and PowerShell run from the root, each area under its heading
-export const linesOf = (steps, base, head = 'HEAD') => {
+const scriptOf = (steps, base, head = 'HEAD') => {
   const lines = [];
   let area;
   let folder = '.';
   const back = () => {
     if (folder !== '.') {
-      lines.push(
-        `cd ${folder
+      lines.push({
+        line: `cd ${folder
           .split('/')
           .map(() => {
             return '..';
           })
-          .join('/')}`
-      );
+          .join('/')}`,
+      });
       folder = '.';
     }
   };
   for (const each of steps) {
     if (each.area !== area) {
       back();
-      lines.push(`# ${each.area}`);
+      lines.push({ line: `# ${each.area}` });
       area = each.area;
     }
     if (each.folder !== folder) {
       back();
       if (each.folder !== '.') {
-        lines.push(`cd ${each.folder}`);
+        lines.push({ line: `cd ${each.folder}` });
         folder = each.folder;
       }
     }
     if (each.note) {
-      lines.push(`# ${each.note}`);
+      lines.push({ line: `# ${each.note}` });
     }
-    lines.push(each.command.replace('{base}', base).replace('{head}', head));
+    lines.push({
+      line: each.command.replace('{base}', base).replace('{head}', head),
+      folder: each.folder,
+    });
   }
   back();
   return lines;
 };
 
+export const linesOf = (steps, base, head = 'HEAD') => {
+  return scriptOf(steps, base, head).map(({ line }) => {
+    return line;
+  });
+};
+
+// * bash on Windows and sh on Linux read the commands' quotes and globs alike; cmd.exe does not.
+// Every command starts in its own folder under the root and inherits the caller's environment.
+// The spawn function is replaceable in tests, as flow.mjs replaces gh.
+export const runSteps = (steps, options = {}) => {
+  const {
+    base = 'origin/develop',
+    head = 'HEAD',
+    spawn = spawnSync,
+    log = console.log,
+    error = console.error,
+  } = options;
+  for (const { line, folder } of scriptOf(steps, base, head)) {
+    log(line);
+    if (folder === undefined) {
+      continue;
+    }
+    const result = spawn(process.platform === 'win32' ? 'bash' : '/bin/sh', ['-c', line], {
+      cwd: resolve(ROOT, folder),
+      env: process.env,
+      stdio: 'inherit',
+    });
+    if (result.status !== 0) {
+      const code = result.status ?? 1;
+      const reason = result.error?.message ?? result.signal ?? `exit ${code}`;
+      error(`ci-scope: ${line} failed (${reason})`);
+      return code;
+    }
+  }
+  return 0;
+};
+
 // ── Main ───────────────────────────────────────────────────────────────────────
 
-const USAGE = `usage: node tools/ci-scope.mjs [--local [--gates] | --paths] [--all | <base> [<head>]]
+const USAGE = `usage: node tools/ci-scope.mjs [--local | --run | --paths] [--gates] [--all | <base> [<head>]]
        node tools/ci-scope.mjs --github | --verdict
+--local prints the commands; --run prints and runs them, stopping with the first failure's exit code.
 Run everything (--all) for a release and a merge into develop.`;
 
 const github = () => {
@@ -1115,6 +1160,7 @@ if (import.meta.main) {
   });
   const known = new Set([
     '--local',
+    '--run',
     '--gates',
     '--all',
     '--paths',
@@ -1142,9 +1188,13 @@ if (import.meta.main) {
       for (const path of paths) {
         console.log(`${path}\t${reachOf(path).join(' ')}`);
       }
-    } else if (flags.has('--local')) {
+    } else if (flags.has('--local') || flags.has('--run')) {
       const steps = stepsOf(areas, paths, { all, gates: flags.has('--gates') });
-      console.log(linesOf(steps, base, head).join('\n'));
+      if (flags.has('--run')) {
+        process.exitCode = runSteps(steps, { base, head });
+      } else {
+        console.log(linesOf(steps, base, head).join('\n'));
+      }
     } else {
       console.log(areas.join('\n'));
     }
