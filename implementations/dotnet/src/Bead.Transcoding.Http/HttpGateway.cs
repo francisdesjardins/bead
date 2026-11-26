@@ -81,7 +81,7 @@ public sealed class HttpGateway : IAsyncDisposable
     // once that start ends, and whether it was disposed
     private readonly Lock _listening = new();
     private WebApplication? _application;
-    private TaskCompletionSource? _starting;
+    private Task<TransportServerAddress>? _starting;
     private bool _isDisposed;
 
     /// <summary>
@@ -204,28 +204,45 @@ public sealed class HttpGateway : IAsyncDisposable
     /// while it listens, or a start binds, an <see cref="InvalidOperationException"/>, as a gateway
     /// listens once. A stop or a dispose that comes as it binds waits for it.
     /// </summary>
-    public async Task<TransportServerAddress> Start(HttpGatewayStartOptions? options = null)
+    public Task<TransportServerAddress> Start(HttpGatewayStartOptions? options = null)
     {
         var start = options ?? new HttpGatewayStartOptions();
-        var cancellationToken = start.CancellationToken;
-        var starting = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
 
         lock (_listening)
         {
             if (_isDisposed)
             {
-                throw new ObjectDisposedException(null, "the gateway is disposed");
+                return Task.FromException<TransportServerAddress>(new ObjectDisposedException(null, "the gateway is disposed"));
             }
 
-            HostsAndOrigins.AssertAddress(start.Address, nameof(HttpGatewayStartOptions.Address));
+            try
+            {
+                HostsAndOrigins.AssertAddress(start.Address, nameof(HttpGatewayStartOptions.Address));
+            }
+            catch (ArgumentException reason)
+            {
+                return Task.FromException<TransportServerAddress>(reason);
+            }
 
             if (_application is not null || _starting is not null)
             {
-                throw new InvalidOperationException("a gateway listens once");
+                return Task.FromException<TransportServerAddress>(new InvalidOperationException("a gateway listens once"));
             }
 
-            _starting = starting;
+            // ! the start's own task, which a stop that comes as it binds awaits: the start settles
+            // before that stop, never after it
+            _starting = Listening(start);
+
+            return _starting;
         }
+    }
+
+    // binds its listener once its start holds it, off the start's lock
+    private async Task<TransportServerAddress> Listening(HttpGatewayStartOptions start)
+    {
+        var cancellationToken = start.CancellationToken;
+
+        await Task.Yield();
 
         try
         {
@@ -261,12 +278,6 @@ public sealed class HttpGateway : IAsyncDisposable
 
             throw;
         }
-        finally
-        {
-            // ! settled once its listener is kept, or its failure cleared: a stop that waited on it
-            // then finds what it bound
-            starting.TrySetResult();
-        }
     }
 
     /// <summary>
@@ -279,13 +290,13 @@ public sealed class HttpGateway : IAsyncDisposable
 
         lock (_listening)
         {
-            starting = _starting?.Task;
+            starting = _starting;
         }
 
         // * a start under way gives its address, then its listener stops here; its outcome is its own
         if (starting is not null)
         {
-            await starting;
+            await Task.WhenAny(starting);
         }
 
         WebApplication? application;
