@@ -19,6 +19,11 @@ const serve = async (steps) => {
 
     requests += 1;
 
+    if (typeof step === 'function') {
+      step(request, response);
+      return;
+    }
+
     if (step === 'drop') {
       request.socket.destroy();
       return;
@@ -121,6 +126,141 @@ describe('a pinned download', () => {
       assert.deepEqual(await fetchPinned(server.url, SHA256, { pause }), BYTES);
       assert.equal(server.requests(), 2);
       assert.deepEqual(pauses, [FIRST_PAUSE]);
+    } finally {
+      await server.close();
+    }
+  });
+
+  test('a server that never answers spends four bounded tries, with no real timeout wait', async () => {
+    const bounds = [];
+    const signals = [];
+    let controller;
+    const timeoutSignal = (ms) => {
+      bounds.push(ms);
+      controller = new AbortController();
+      signals.push(controller.signal);
+
+      return controller.signal;
+    };
+    const server = await serve([
+      () => {
+        controller.abort(new DOMException('download try timed out', 'TimeoutError'));
+      },
+    ]);
+    const { pauses, pause } = recorder();
+
+    try {
+      await assert.rejects(fetchPinned(server.url, SHA256, { pause, timeoutSignal }), {
+        message: `${server.url}: download try timed out, after 4 tries`,
+      });
+      assert.equal(server.requests(), TRIES);
+      assert.deepEqual(bounds, [60_000, 60_000, 60_000, 60_000]);
+      assert.equal(new Set(signals).size, TRIES);
+      assert.ok(
+        signals.every((signal) => {
+          return signal.aborted;
+        })
+      );
+      assert.deepEqual(pauses, [FIRST_PAUSE, FIRST_PAUSE * 2, FIRST_PAUSE * 4]);
+    } finally {
+      await server.close();
+    }
+  });
+
+  test('a timed-out try gives the next try its own configured bound and checks its pin', async () => {
+    const bounds = [];
+    const signals = [];
+    let controller;
+    const timeoutSignal = (ms) => {
+      bounds.push(ms);
+      controller = new AbortController();
+      signals.push(controller.signal);
+
+      return controller.signal;
+    };
+    const server = await serve([
+      () => {
+        controller.abort(new DOMException('download try timed out', 'TimeoutError'));
+      },
+      OK,
+    ]);
+    const { pauses, pause } = recorder();
+
+    try {
+      assert.deepEqual(
+        await fetchPinned(server.url, SHA256, { pause, timeout: 123, timeoutSignal }),
+        BYTES
+      );
+      assert.deepEqual(bounds, [123, 123]);
+      assert.notEqual(signals[0], signals[1]);
+      assert.equal(signals[1].aborted, false);
+      assert.equal(server.requests(), 2);
+      assert.deepEqual(pauses, [FIRST_PAUSE]);
+    } finally {
+      await server.close();
+    }
+  });
+
+  test('a timeout outside the timer’s range is refused before a request', async () => {
+    const server = await serve([OK]);
+
+    try {
+      for (const timeout of [0, -1, 0.5, NaN, Infinity, 2 ** 31, 2 ** 32, '1000']) {
+        await assert.rejects(fetchPinned(server.url, SHA256, { timeout }), /a try's timeout is/u);
+      }
+
+      assert.equal(server.requests(), 0);
+    } finally {
+      await server.close();
+    }
+  });
+
+  test('a timeout while its body is read retries the whole file, under a fresh bound', async (context) => {
+    const nativeFetch = globalThis.fetch;
+    let controller;
+    let answers = 0;
+
+    context.mock.method(globalThis, 'fetch', async (url, options) => {
+      const response = await nativeFetch(url, options);
+
+      answers += 1;
+
+      if (answers === 1) {
+        const read = response.arrayBuffer.bind(response);
+
+        context.mock.method(response, 'arrayBuffer', () => {
+          controller.abort(new DOMException('download body timed out', 'TimeoutError'));
+
+          return read();
+        });
+      }
+
+      return response;
+    });
+
+    const server = await serve([
+      (_request, response) => {
+        response.writeHead(200, { 'Content-Length': '4' });
+        response.write('b');
+      },
+      OK,
+    ]);
+    const { pauses, pause } = recorder();
+    const signals = [];
+    const timeoutSignal = () => {
+      controller = new AbortController();
+      signals.push(controller.signal);
+
+      return controller.signal;
+    };
+
+    try {
+      assert.deepEqual(await fetchPinned(server.url, SHA256, { pause, timeoutSignal }), BYTES);
+      assert.equal(answers, 2);
+      assert.equal(server.requests(), 2);
+      assert.deepEqual(pauses, [FIRST_PAUSE]);
+      assert.equal(signals[0].aborted, true);
+      assert.equal(signals[1].aborted, false);
     } finally {
       await server.close();
     }

@@ -21,6 +21,10 @@ const TRIES = 4;
 const FIRST_PAUSE = 2_000;
 // the longest pause between two tries, in milliseconds, a `Retry-After` included
 const LONGEST_PAUSE = 60_000;
+// a try's headers and body together: 10 MiB at about 175 KiB/s fit within a minute
+const TRY_TIMEOUT = 60_000;
+// Node's longest timer delay, in milliseconds, past which it fires at once
+const LONGEST_TIMEOUT = 2 ** 31 - 1;
 
 const SHA256 = /^[0-9a-f]{64}$/u;
 const INTEGRITY = /^sha512-[A-Za-z0-9+/]+={0,2}$/u;
@@ -76,11 +80,11 @@ const retryAfterOf = (value) => {
 };
 
 // one try: its bytes, or why it failed, whether a later try may pass, and the pause it asks for
-const tryOnce = async (url) => {
+const tryOnce = async (url, signal) => {
   let response;
 
   try {
-    response = await fetch(url);
+    response = await fetch(url, { signal });
   } catch (error) {
     return { transient: true, reason: reasonOf(error) };
   }
@@ -114,10 +118,15 @@ const tryOnce = async (url) => {
  * integrity, `sha512-<base64>`. A network error, a body cut short, a 408, a 429 and a 5xx are tried
  * again, `options.tries` times in all, four by default, after a pause `options.pause(ms)` waits, a
  * timer by default. Any other failed status is refused at once, and so is a digest off the pin.
+ * Each try's headers and body share `options.timeout` milliseconds, 60,000 by default; an expired
+ * try is a network error. A test can give `options.timeoutSignal(ms)` in place of
+ * `AbortSignal.timeout` to fire that bound without waiting.
  */
 export const fetchPinned = async (url, pin, options = {}) => {
   const tries = options.tries ?? TRIES;
   const pause = options.pause ?? sleep;
+  const timeout = options.timeout ?? TRY_TIMEOUT;
+  const timeoutSignal = options.timeoutSignal ?? AbortSignal.timeout;
 
   if (typeof pin !== 'string' || (!SHA256.test(pin) && !INTEGRITY.test(pin))) {
     throw new Error(
@@ -129,10 +138,16 @@ export const fetchPinned = async (url, pin, options = {}) => {
     throw new Error(`${url}: ${String(tries)} tries, where a download makes one at least`);
   }
 
+  if (!Number.isInteger(timeout) || timeout < 1 || timeout > LONGEST_TIMEOUT) {
+    throw new Error(
+      `${url}: a try's timeout is 1 to ${String(LONGEST_TIMEOUT)} milliseconds, not ${String(timeout)}`
+    );
+  }
+
   let last;
 
   for (let attempt = 1; attempt <= tries; attempt += 1) {
-    const answer = await tryOnce(url);
+    const answer = await tryOnce(url, timeoutSignal(timeout));
 
     if (answer.bytes !== undefined) {
       const digest = digestOf(pin, answer.bytes);
