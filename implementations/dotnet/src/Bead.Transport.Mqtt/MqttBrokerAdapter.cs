@@ -551,10 +551,10 @@ public sealed class MqttBrokerAdapter : IBrokerAdapter, IAsyncDisposable
     /// Lets the subscription to <paramref name="topic"/> go, by the filter its SUBSCRIBE named, or
     /// the topic itself where it held none, its UNSUBSCRIBE sent as it is called; settles once its
     /// UNSUBACK came of 0x00, or 0x11 where its broker held none, each PUBLISH its broker sent of it
-    /// before then read first, its connection carrying both in order ([MQTT-3.10.4-3]); fails on a
-    /// code of 0x80 or more, whether or not UNSUBACK's table names it, an <see cref="IOException"/>
-    /// naming it, with its link's loss on one under 0x80 it does not name or of a count of codes
-    /// other than one (spec 15.29), and with none within
+    /// before then handed on first, its connection carrying both in order ([MQTT-3.10.4-3]); fails
+    /// on a code of 0x80 or more, whether or not UNSUBACK's table names it, an
+    /// <see cref="IOException"/> naming it, with its link's loss on one under 0x80 it does not name
+    /// or of a count of codes other than one (spec 15.29), and with none within
     /// <see cref="MqttBrokerAdapterOptions.ConnectTimeout"/> of its call, a
     /// <see cref="TimeoutException"/> naming it, its link kept so that no will goes (spec 15.27).
     /// Its filter stays its link's until such an UNSUBACK came, a late one among them, so that a
@@ -602,6 +602,14 @@ public sealed class MqttBrokerAdapter : IBrokerAdapter, IAsyncDisposable
     {
         var (link, (key, held)) = asked;
         var left = await unsubscribing;
+
+        // ! MQTTnet hands a PUBLISH on from a queue of its own, and an UNSUBACK at once: its word
+        // waits for each PUBLISH its broker sent before it, so that an OPEN matched before the name
+        // went reaches its participant first (spec 15.21, 15.31). It resumes off its caller's
+        // scheduler: one that resumed it late, after those PUBLISH packets posted to it, would
+        // otherwise go on inline, ahead of what they posted
+        await CaughtUp(link).ConfigureAwait(ConfigureAwaitOptions.ForceYielding);
+
         var code = left.Items.Single().ResultCode;
 
         if (code is not (MqttClientUnsubscribeResultCode.Success or MqttClientUnsubscribeResultCode.NoSubscriptionExisted))
@@ -1119,7 +1127,15 @@ public sealed class MqttBrokerAdapter : IBrokerAdapter, IAsyncDisposable
         {
             // ! acknowledged by its participant's settle alone, never by the library
             received.AutoAcknowledge = false;
-            Take((link, received));
+
+            try
+            {
+                Take((link, received));
+            }
+            finally
+            {
+                HandedOn(link);
+            }
 
             return Task.CompletedTask;
         };
@@ -1141,10 +1157,20 @@ public sealed class MqttBrokerAdapter : IBrokerAdapter, IAsyncDisposable
             if (inspected.Direction == MqttPacketFlowDirection.Outbound)
             {
                 Interlocked.Exchange(ref link.LastSent, _platform.GetTimestamp());
+
+                return Task.CompletedTask;
             }
+
+            // * each PUBLISH counted as its receive loop reads it, in its connection's order, before
+            // MQTTnet queues it to hand on
+            if (inspected.Buffer is [var header, ..] && header >> 4 == MqttPackets.Publish)
+            {
+                Interlocked.Increment(ref link.Received);
+            }
+
             // ! judged whole, before MQTTnet decodes it: its end cancels what awaits it before
             // MQTTnet hands that a code, whatever context its caller resumes on
-            else if (MqttPackets.UnreadableOf(inspected.Buffer) is { } words)
+            if (MqttPackets.UnreadableOf(inspected.Buffer) is { } words)
             {
                 Lost((link, new IOException($"the link of {Id} went down: its broker sent {words}")));
             }
@@ -1235,6 +1261,54 @@ public sealed class MqttBrokerAdapter : IBrokerAdapter, IAsyncDisposable
             }
 
             HandOn((link, received), isAcknowledged);
+        }
+    }
+
+    // a PUBLISH MQTTnet dispatched, handed on or dropped: each wait for the ones read before it that
+    // it completes settles
+    private void HandedOn(Link link)
+    {
+        List<TaskCompletionSource> caught = [];
+
+        lock (_gate)
+        {
+            link.Dispatched += 1;
+            link.Behind.RemoveAll((waiting) =>
+            {
+                if (waiting.Through > link.Dispatched)
+                {
+                    return false;
+                }
+
+                caught.Add(waiting.Caught);
+
+                return true;
+            });
+        }
+
+        foreach (var waiting in caught)
+        {
+            waiting.TrySetResult();
+        }
+    }
+
+    // settles once MQTTnet dispatched each PUBLISH its link read so far, or once its link ended
+    private Task CaughtUp(Link link)
+    {
+        lock (_gate)
+        {
+            var through = Interlocked.Read(ref link.Received);
+
+            if (link.IsEnded || link.Dispatched >= through)
+            {
+                return Task.CompletedTask;
+            }
+
+            var caught = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+
+            link.Behind.Add((through, caught));
+
+            return caught.Task;
         }
     }
 
@@ -1378,6 +1452,7 @@ public sealed class MqttBrokerAdapter : IBrokerAdapter, IAsyncDisposable
     {
         var (link, down) = ending;
         bool wasUp;
+        List<TaskCompletionSource> behind;
 
         lock (_gate)
         {
@@ -1389,6 +1464,13 @@ public sealed class MqttBrokerAdapter : IBrokerAdapter, IAsyncDisposable
             link.IsEnded = true;
             link.Ended = reason;
             wasUp = link.IsUp;
+
+            // * what MQTTnet has not dispatched by its end it never will
+            behind = [.. link.Behind.Select((waiting) =>
+            {
+                return waiting.Caught;
+            })];
+            link.Behind.Clear();
 
             // * a loss before its start's continuation, told by it where its CONNACK put it up,
             // dropped where its start fails
@@ -1415,6 +1497,11 @@ public sealed class MqttBrokerAdapter : IBrokerAdapter, IAsyncDisposable
         if (wasUp && down is not null && !link.IsStopping)
         {
             Down?.Invoke(down);
+        }
+
+        foreach (var waiting in behind)
+        {
+            waiting.TrySetResult();
         }
 
         link.Quota?.End(new IOException(reason.Message, reason));
@@ -1452,6 +1539,15 @@ public sealed class MqttBrokerAdapter : IBrokerAdapter, IAsyncDisposable
         public long LastSent = platform.GetTimestamp();
 
         public int IsPinging;
+
+        // the PUBLISH packets its receive loop read, which MQTTnet dispatches from a queue of its
+        // own, and those it dispatched; and what waits for it to dispatch each read before it, by
+        // that count
+        public long Received;
+
+        public long Dispatched { get; set; }
+
+        public List<(long Through, TaskCompletionSource Caught)> Behind { get; } = [];
 
         public IMqttClient Client { get; } = client;
 

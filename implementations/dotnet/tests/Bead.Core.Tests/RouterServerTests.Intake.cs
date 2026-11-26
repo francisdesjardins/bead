@@ -364,11 +364,21 @@ public sealed partial class RouterServerTests
         _transport.Open(First);
 
         // * four bytes in two UTF-16 code units: its bound reached, counted before it is reported
-        _transport.DeliverText(First, "éé");
+        using (var held = HoldRouter())
+        {
+            try
+            {
+                _transport.DeliverText(First, "éé");
 
-        Assert.True(_transport.IsPaused(First));
+                Assert.True(_transport.IsPaused(First));
+            }
+            finally
+            {
+                held.Set();
+            }
 
-        await Settle();
+            await Settle();
+        }
 
         // reported paused, released in that turn, and nothing handed on or answered
         Assert.Equal([($"{ProtocolCode.EnvelopeMalformed} an envelope is binary, not a string", (string?)First, true)], reported);

@@ -30,7 +30,10 @@ internal enum MqttAcknowledgementVerdict
 /// </summary>
 internal static class MqttPackets
 {
-    /// <summary>A PUBACK's fixed header's packet type (MQTT 5.0 §2.1.2).</summary>
+    /// <summary>A PUBLISH's fixed header's packet type (MQTT 5.0 §2.1.2).</summary>
+    public const int Publish = 3;
+
+    /// <summary>A PUBACK's fixed header's packet type.</summary>
     public const int PubAck = 4;
 
     /// <summary>A SUBACK's fixed header's packet type.</summary>

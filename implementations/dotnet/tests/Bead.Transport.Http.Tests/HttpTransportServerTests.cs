@@ -564,6 +564,14 @@ public sealed partial class HttpTransportServerTests : IAsyncLifetime
         _port = (await _server.Start(Loopback with { CancellationToken = Cancelled })).Port;
     }
 
+    // ! a test that probes its server's port once it stopped moves the server first to a port below
+    // the ephemeral range, which no other test's bind of port 0 takes meanwhile
+    private async Task MoveToNonEphemeral()
+    {
+        await _server.Stop().WaitAsync(Patience, Cancelled);
+        _port = (await _server.Start(new TransportServerStartOptions { Address = Host, Port = NonEphemeralPorts.Drawn(), CancellationToken = Cancelled })).Port;
+    }
+
     /// <summary>An answer's head: its status, and its headers by their names in lower case.</summary>
     private sealed record Head(int Status, IReadOnlyDictionary<string, string> Headers);
 
@@ -926,36 +934,6 @@ public sealed partial class HttpTransportServerTests : IAsyncLifetime
         }
     }
 
-    // ! ports below every system's ephemeral range (RFC 6335 §6), which no bind of port 0 is given: a
-    // test that probes the IPv4 loopback on a port it drew draws it here, or another test's bind of
-    // port 0 may take that port on IPv4 meanwhile
-    private const int NonEphemeralPorts = 20_000;
-    private const int NonEphemeralPortsCount = 10_000;
-
-    // a port below the ephemeral range free on both loopbacks as it is drawn, let go at once
-    private static int DrawnNonEphemeral()
-    {
-        for (var attempt = 0; ; attempt += 1)
-        {
-            var port = NonEphemeralPorts + Random.Shared.Next(NonEphemeralPortsCount);
-
-            try
-            {
-                using var v4 = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
-                using var v6 = new Socket(AddressFamily.InterNetworkV6, SocketType.Stream, ProtocolType.Tcp) { DualMode = false };
-
-                v4.Bind(new IPEndPoint(IPAddress.Loopback, port));
-                v6.Bind(new IPEndPoint(IPAddress.IPv6Loopback, port));
-
-                return port;
-            }
-            catch (SocketException) when (attempt < 64)
-            {
-                // taken on one loopback or the other: another draw
-            }
-        }
-    }
-
     // a socket of another process's on the IPv6 loopback, IPv6 alone, listening on the port given,
     // for 0 one below the ephemeral range free on both loopbacks
     private static Socket HeldOnIPv6(int port)
@@ -966,7 +944,7 @@ public sealed partial class HttpTransportServerTests : IAsyncLifetime
             {
                 try
                 {
-                    return HeldOnIPv6(DrawnNonEphemeral());
+                    return HeldOnIPv6(NonEphemeralPorts.Drawn());
                 }
                 catch (SocketException) when (attempt < 64)
                 {
@@ -2792,6 +2770,7 @@ public sealed partial class HttpTransportServerTests : IAsyncLifetime
     public async Task Serves_HTTP_2_and_HTTP_1_1_on_one_port_a_call_over_each_and_closes_its_sessions_as_it_stops()
     {
         await Start(new HttpTransportServerOptions { Certificate = Certificate.Value });
+        await MoveToNonEphemeral();
 
         // each request answered by its result, as a router would
         _server.Message += (message, connectionHandle) =>
@@ -4025,7 +4004,7 @@ public sealed partial class HttpTransportServerTests : IAsyncLifetime
             {
                 DrawPort = () =>
                 {
-                    drawn.Add(drawn.Count == 0 ? held : DrawnNonEphemeral());
+                    drawn.Add(drawn.Count == 0 ? held : NonEphemeralPorts.Drawn());
 
                     return drawn[^1];
                 },

@@ -51,6 +51,7 @@ import {
 } from '../websocket-transport-server';
 import {
   bindError,
+  drawnNonEphemeral,
   hasIPv6Loopback,
   holdIPv6Loopback,
   isFreeOn,
@@ -848,6 +849,11 @@ for (const [label, Tracked] of IMPLEMENTATIONS) {
 
     test.describe('WebSocketTransportServer #stop', () => {
       test('"await using" stops it, closing with 1001 and refusing what comes after', async () => {
+        // ! its port probed once it stopped: one below the ephemeral range, which no other test's
+        // listener takes meanwhile
+        await server.stop();
+        ({ port } = await server.start({ address: host, port: await drawnNonEphemeral() }));
+
         const [{ socket }] = await connectClient(client);
         const clientClosed = nextClientEvent(client, 'close');
         const code = new Promise<number>((resolve) => {
@@ -873,6 +879,11 @@ for (const [label, Tracked] of IMPLEMENTATIONS) {
       });
 
       test('stop closes every connection, each raising its close before it resolves, and stops listening', async () => {
+        // ! its port probed once it stopped: one below the ephemeral range, which no other test's
+        // listener takes meanwhile
+        await server.stop();
+        ({ port } = await server.start({ address: host, port: await drawnNonEphemeral() }));
+
         const second = createWebSocketTransportClient({ WebSocket: Tracked });
         const closeEvents: [boolean, string][] = [];
         server.on('close', (clean, connectionHandle) => {
@@ -915,6 +926,10 @@ for (const [label, Tracked] of IMPLEMENTATIONS) {
       });
 
       test('stops at once when never started, stops twice, then starts again and accepts', async () => {
+        // ! its first port one below the ephemeral range, which no draw of a port gives its restart
+        await server.stop();
+        ({ port } = await server.start({ address: host, port: await drawnNonEphemeral() }));
+
         const firstPort = port;
         const [, before] = await connectClient(client);
         const clientClosed = nextClientEvent(client, 'close');
@@ -2987,7 +3002,11 @@ test.describe('WebSocketTransportServer, heartbeat', () => {
   // spec 15.3: the ping goes behind what its socket holds alone, so the 400 messages of 64 KiB the
   // transport holds pass what any loopback's buffers hold
   test('pings ahead of what it holds unsent, so a silent reader behind a backlog reads the ping before the backlog’s end and is kept', async () => {
+    // * its heartbeat runs on its platform's clock, here a test's, stepped a heartbeat at a time: no
+    // ping nor drop comes due as it reads, however long that takes
+    const platform = createTestClock();
     await using started = await startDated({
+      [PLATFORM]: platform,
       heartbeat: 1_000,
       maximumUnsentBytes: 67_108_864,
       minimumSendBytesPerSecond: 0,
@@ -3012,9 +3031,8 @@ test.describe('WebSocketTransportServer, heartbeat', () => {
         void server.send({ data: new Uint8Array(65_536) }, connectionHandle);
       }
 
-      // its ping out, a heartbeat and a half past its last read, .NET's keep-alive pinging up to a quarter
-      // of a heartbeat late, it reads all, echoing the ping as it comes
-      await sleep(1_500);
+      // its ping out a heartbeat past its last read; then it reads all, echoing the ping as it comes
+      await platform.tickAsync(1_000);
       socket.on('data', (chunk: Buffer) => {
         rest = Buffer.concat([rest, chunk]);
 
@@ -3066,9 +3084,19 @@ test.describe('WebSocketTransportServer, heartbeat', () => {
 
       expect([ping >= 0, ping < 400, order.length]).toEqual([true, true, 401]);
 
-      // its echo read within its heartbeat: kept
-      await sleep(1_200);
-      expect(closes).toEqual([]);
+      // its echo read within its heartbeat: kept, and pinged again a heartbeat past it, which no
+      // ping left unanswered allows. A message after its echo tells it read, and answers no ping
+      const message = nextServerEvent(server, 'message');
+
+      socket.write(maskedFrame(OPCODES.BINARY, new Uint8Array([7])));
+      await message;
+      await platform.tickAsync(1_000);
+      await expect
+        .poll(() => {
+          return order.length;
+        })
+        .toBe(402);
+      expect([order[401], closes]).toEqual(['ping', []]);
     } finally {
       socket.destroy();
     }

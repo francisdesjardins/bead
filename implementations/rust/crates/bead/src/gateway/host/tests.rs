@@ -21,6 +21,7 @@ use crate::service::{
     AdmissionRule, Descriptor, DescriptorInit, NotifyingDescriptor, ServiceProcedure,
     ServiceServer, ServiceServerOptions, notifying_of, request_of,
 };
+use crate::testing::closed_port::drawn_non_ephemeral;
 use crate::testing::patience;
 use crate::testing::wire::ResponseReader;
 use crate::transcoding::routes::{HttpRouteInit, route_of};
@@ -814,9 +815,11 @@ async fn settles_a_start_its_stop_or_its_dispose_overtook_with_its_address_and_l
  {
     for is_disposing in [false, true] {
         let fixture = Fixture::new(|_| {}, false).await;
+        // ! its port probed once it let it go: one below the ephemeral range, which no other
+        // test's bind of port 0 takes meanwhile
         let starting = fixture.gateway.start(&HttpGatewayStartOptions {
             address: Some(HOST.to_owned()),
-            find_open_port: Some(true),
+            port: Some(drawn_non_ephemeral().unwrap()),
             ..HttpGatewayStartOptions::default()
         });
         let ending = if is_disposing {

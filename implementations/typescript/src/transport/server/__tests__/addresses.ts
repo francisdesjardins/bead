@@ -79,6 +79,31 @@ export const hasIPv6Loopback = (): Promise<boolean> => {
   return isFreeOn('::1', 0);
 };
 
+/**
+ * A port below every system's ephemeral range (RFC 6335 §6), free on both loopbacks as it is drawn,
+ * let go at once, as the C# side's `NonEphemeralPorts.Drawn` and the Rust side's
+ * `drawn_non_ephemeral` draw it.
+ */
+// ! no bind of port 0 is given such a port: a test that probes its server's port once it stopped
+// starts it on one drawn here, or another test's listener may take that port meanwhile
+export const drawnNonEphemeral = async (): Promise<number> => {
+  const isIPv6 = await hasIPv6Loopback();
+
+  for (let attempt = 0; ; attempt += 1) {
+    const port = 20_000 + Math.floor(Math.random() * 10_000);
+
+    if ((await isFreeOn('127.0.0.1', port)) && (!isIPv6 || (await isFreeOn('::1', port)))) {
+      return port;
+    }
+
+    if (attempt >= 64) {
+      throw new Error('no port below the ephemeral range is free on both loopbacks');
+    }
+
+    // * taken on one loopback or the other: another draw
+  }
+};
+
 /** An error a bind fails with, its `code` as Node gives it. */
 export const bindError = (code: string): Error => {
   return Object.assign(new Error(`listen ${code}`), { code });
