@@ -271,11 +271,8 @@ pub trait ServerTransport: Send + Sync + fmt::Debug {
     fn resume(&self, connection_handle: &ConnectionHandle);
 
     /// The clock it runs on, which the layers above it run on too: the same on every call. Bead's
-    /// transports give the one they were given, or their platform's; one that gives none leaves a
-    /// layer over it the clock it is given, or its platform's.
-    fn clock(&self) -> Option<SharedClock> {
-        None
-    }
+    /// transports give the one they were given, or their platform's.
+    fn clock(&self) -> SharedClock;
 
     /// Whether a connection carries both ways.
     fn is_two_way(&self, _connection_handle: &ConnectionHandle) -> bool {
@@ -390,11 +387,8 @@ pub trait RouterClientTransport: Send + Sync + fmt::Debug {
     fn resume(&self);
 
     /// The clock it runs on, which the layers above it run on too: the same on every call. Bead's
-    /// transports give the one they were given, or their platform's; one that gives none leaves a
-    /// layer over it the clock it is given, or its platform's.
-    fn clock(&self) -> Option<SharedClock> {
-        None
-    }
+    /// transports give the one they were given, or their platform's.
+    fn clock(&self) -> SharedClock;
 
     /// Whether it stays off the machine's clear.
     fn is_secure(&self) -> bool {

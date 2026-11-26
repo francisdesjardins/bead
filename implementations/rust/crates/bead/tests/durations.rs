@@ -184,9 +184,10 @@ fn hold<S: FnOnce() -> String>(holds: bool, said: S) -> Result<(), String> {
 
 // ── The transports ───────────────────────────────────────────────────────────────────────────
 
-// a client's transport, open, which records what it sends
-#[derive(Debug, Default)]
+// a client's transport, open, on its test's clock, which records what it sends
+#[derive(Debug)]
 struct Recording {
+    clock: SharedClock,
     sent: Mutex<Vec<Bytes>>,
 }
 
@@ -209,6 +210,10 @@ impl RouterClientTransport for Recording {
 
     fn resume(&self) {}
 
+    fn clock(&self) -> SharedClock {
+        Arc::clone(&self.clock)
+    }
+
     fn ready_state(&self) -> ReadyState {
         ReadyState::Open
     }
@@ -218,9 +223,10 @@ impl RouterClientTransport for Recording {
     }
 }
 
-// a server's transport of the connections it is told, which records what it closes
-#[derive(Default)]
+// a server's transport of the connections it is told, on its test's clock, which records what it
+// closes
 struct Pipe {
+    clock: SharedClock,
     listeners: Mutex<Vec<Arc<dyn ServerListener>>>,
     closed: Mutex<Vec<ConnectionHandle>>,
 }
@@ -232,6 +238,14 @@ impl core::fmt::Debug for Pipe {
 }
 
 impl Pipe {
+    fn on(clock: &Arc<SteppingClock>) -> Self {
+        Self {
+            clock: shared_of(clock),
+            listeners: Mutex::default(),
+            closed: Mutex::default(),
+        }
+    }
+
     fn open(&self, handle: &str) {
         let handle: ConnectionHandle = Arc::from(handle);
 
@@ -284,6 +298,10 @@ impl ServerTransport for Pipe {
 
     fn resume(&self, _connection_handle: &ConnectionHandle) {}
 
+    fn clock(&self) -> SharedClock {
+        Arc::clone(&self.clock)
+    }
+
     fn is_secure(&self, _connection_handle: &ConnectionHandle) -> bool {
         true
     }
@@ -315,7 +333,10 @@ struct Calling {
 
 fn calling() -> Result<Calling, String> {
     let clock = SteppingClock::new(epoch());
-    let transport = Arc::new(Recording::default());
+    let transport = Arc::new(Recording {
+        clock: shared_of(&clock),
+        sent: Mutex::default(),
+    });
     let mut options = RouterClientOptions::default();
 
     options.clock = Some(shared_of(&clock));
@@ -604,7 +625,7 @@ struct Relaying {
 
 fn relaying(relay: &RelayOptions) -> Result<Relaying, ProgrammerError> {
     let clock = SteppingClock::new(epoch());
-    let pipe = Arc::new(Pipe::default());
+    let pipe = Arc::new(Pipe::on(&clock));
     let mut options = RouterServerOptions::default();
 
     options.clock = Some(shared_of(&clock));
@@ -690,7 +711,7 @@ struct Serving {
 
 fn serving(options: &ServerOptions) -> Result<Serving, ProgrammerError> {
     let clock = SteppingClock::new(epoch());
-    let pipe = Arc::new(Pipe::default());
+    let pipe = Arc::new(Pipe::on(&clock));
     let mut options = options.clone();
 
     options.clock = Some(shared_of(&clock));

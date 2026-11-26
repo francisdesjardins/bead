@@ -98,7 +98,7 @@ pub struct SessionRequest<'a> {
 #[derive(Clone, Default)]
 #[non_exhaustive]
 pub struct RouterServerOptions {
-    /// The clock it runs on: its transport's, which one given must be; the platform's when none.
+    /// The clock it runs on: its transport's, which one given must be.
     pub clock: Option<SharedClock>,
     /// The runtime its owner runs on: the current one when none. Its timers run on its clock, its
     /// transport's, so on the runtime that clock arms on.
@@ -1775,10 +1775,6 @@ impl RouterServer {
         Self::build(transport, (options, None))
     }
 
-    #[expect(
-        clippy::too_many_lines,
-        reason = "the server binds its transport, clock, session providers and owner in one construction"
-    )]
     pub(crate) fn build(
         transport: Arc<dyn ServerTransport>,
         (options, facade): (&RouterServerOptions, Option<crate::server::Facade>),
@@ -1788,19 +1784,12 @@ impl RouterServer {
             |last| crate::router::parts::PendingCalls::bounded(RouterSide::Server, last),
         )?;
         let runtime = crate::platform::runtime_of(options.runtime.as_ref(), "a router")?;
-        #[expect(
-            clippy::disallowed_methods,
-            reason = "where a stack starts: its platform's clock"
-        )]
         let clock = crate::clock::clock_of(&crate::clock::LayeredClocks {
-            beneath: transport.clock().as_ref(),
+            beneath: &transport.clock(),
             given: options.clock.as_ref(),
             layer: "a server's router",
             below: "its transport",
-        })?
-        .unwrap_or_else(|| -> SharedClock {
-            Arc::new(crate::clock::SystemClock::on(runtime.clone()))
-        });
+        })?;
         let limits = limits_of(&options.limits.clone().unwrap_or_default())?;
         let pacing = pacing_limits_of(&options.pacing.clone().unwrap_or_default())?;
         let intake = Intake::new(intake_limits_of(

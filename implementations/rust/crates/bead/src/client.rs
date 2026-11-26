@@ -5,7 +5,6 @@ use std::sync::Arc;
 
 use tokio::runtime::Handle;
 
-use crate::clock::SharedClock;
 use crate::credentials::Credentials;
 use crate::errors::ProgrammerError;
 use crate::managers::service::{ServiceManagerClient, ServiceManagerOptions};
@@ -72,10 +71,9 @@ impl Client {
         transport: Arc<dyn RouterClientTransport>,
         options: &ClientOptions,
     ) -> Result<Self, ProgrammerError> {
-        let clock: Option<SharedClock> = transport.clock();
         let router_options = RouterClientOptions {
             last_call_id: None,
-            clock,
+            clock: Some(transport.clock()),
             runtime: options.runtime.clone(),
             credential: options.credential.clone(),
             credentials: options.credentials.clone(),

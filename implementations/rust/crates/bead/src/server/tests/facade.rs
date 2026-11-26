@@ -902,10 +902,7 @@ async fn builds_each_layer_on_the_one_under_it_the_router_with_the_sessions_toke
     assert!(Arc::ptr_eq(&fixture.server.transport(), &wire));
     assert!(Arc::ptr_eq(&fixture.server.router().transport(), &wire));
     assert_eq!(fixture.server.router().limits().maximum_payload_bytes, 8);
-    assert!(Arc::ptr_eq(
-        &fixture.server.router().clock(),
-        &wire.clock().expect("a clock")
-    ));
+    assert!(Arc::ptr_eq(&fixture.server.router().clock(), &wire.clock()));
     fixture.sessions((None, None));
     fixture.open().await;
     let token = SessionToken::new([4; 16]).expect("a token");

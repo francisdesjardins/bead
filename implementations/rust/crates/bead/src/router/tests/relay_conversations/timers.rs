@@ -79,8 +79,8 @@ impl RouterClientTransport for RecordedClient {
         self.memory.resume();
     }
 
-    fn clock(&self) -> Option<SharedClock> {
-        Some(Arc::clone(&self.clock))
+    fn clock(&self) -> SharedClock {
+        Arc::clone(&self.clock)
     }
 
     fn ready_state(&self) -> ReadyState {

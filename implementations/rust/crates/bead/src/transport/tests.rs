@@ -5,12 +5,91 @@
 use std::sync::{Arc, Mutex, PoisonError};
 
 use super::{
-    Listeners, RECONNECT_DEFAULTS, ReadyState, ServerListener, TransportClientReconnectDelay,
-    TransportServerRefusal, is_field_value, tell_server,
+    ClientListener, Listeners, RECONNECT_DEFAULTS, ReadyState, Sent, ServerListener,
+    TransportClientReconnectDelay, TransportServerRefusal, is_field_value, tell_server,
 };
-use crate::router::types::{ConnectionHandle, RouterError};
+use crate::clock::SharedClock;
+use crate::router::types::{BoxFuture, ConnectionHandle, RouterError, TransportMessage};
+use crate::testing::scripted::{ScriptedClient, ScriptedServer};
 
 mod reconnection;
+
+// a scripted transport that overrides nothing it may leave: it gives the trait's required items,
+// its clock among them, and keeps the trait's defaults for the rest
+#[derive(Debug)]
+struct Bare<T>(Arc<T>);
+
+impl super::RouterClientTransport for Bare<ScriptedClient> {
+    fn send(&self, message: TransportMessage) -> Result<Sent, RouterError> {
+        self.0.send(message)
+    }
+
+    fn listen(&self, listener: Arc<dyn ClientListener>) {
+        self.0.listen(listener);
+    }
+
+    fn unlisten(&self, listener: &Arc<dyn ClientListener>) {
+        self.0.unlisten(listener);
+    }
+
+    fn pause(&self) {
+        self.0.pause();
+    }
+
+    fn disconnect(&self) {
+        self.0.disconnect();
+    }
+
+    fn resume(&self) {
+        self.0.resume();
+    }
+
+    fn clock(&self) -> SharedClock {
+        self.0.clock()
+    }
+
+    fn ready_state(&self) -> ReadyState {
+        self.0.ready_state()
+    }
+}
+
+impl super::ServerTransport for Bare<ScriptedServer> {
+    fn send(
+        &self,
+        message: TransportMessage,
+        handle: &ConnectionHandle,
+    ) -> Result<Sent, RouterError> {
+        self.0.send(message, handle)
+    }
+
+    fn close(&self, handle: &ConnectionHandle) -> BoxFuture<bool> {
+        self.0.close(handle)
+    }
+
+    fn listen(&self, listener: Arc<dyn ServerListener>) {
+        self.0.listen(listener);
+    }
+
+    fn unlisten(&self, listener: &Arc<dyn ServerListener>) {
+        self.0.unlisten(listener);
+    }
+
+    fn pause(&self, handle: &ConnectionHandle) {
+        self.0.pause(handle);
+    }
+
+    fn resume(&self, handle: &ConnectionHandle) {
+        self.0.resume(handle);
+    }
+
+    fn clock(&self) -> SharedClock {
+        self.0.clock()
+    }
+
+    fn stop(&self) -> BoxFuture<Result<(), RouterError>> {
+        self.0.stop()
+    }
+}
 
 #[test]
 fn takes_a_field_s_value_as_a_credential_visible_ascii_spaces_and_tabs_alone_none_first_or_last() {
@@ -86,19 +165,16 @@ fn reconnects_five_times_a_second_apart_by_default() {
 #[test]
 fn a_transport_counts_nothing_unless_it_says_so() {
     use std::collections::BTreeMap;
-    use std::sync::Arc;
 
     use super::ServerTransport;
     use crate::router::types::Gauges;
     use crate::testing::SteppingClock;
-    use crate::testing::clockless::Clockless;
-    use crate::testing::scripted::ScriptedServer;
 
     let counting = ScriptedServer::new(SteppingClock::new(crate::testing::instants::new_year()));
     let counted = Gauges::new(BTreeMap::from([("held", 1)]), []);
     counting.count_as(Some(counted.clone()));
     assert_eq!(counting.gauges(), Some(counted));
-    assert_eq!(Clockless(Arc::clone(&counting)).gauges(), None);
+    assert_eq!(Bare(Arc::clone(&counting)).gauges(), None);
 }
 
 // These are the Rust traits' defaults for a transport supplied by the application.
@@ -106,12 +182,11 @@ fn a_transport_counts_nothing_unless_it_says_so() {
 fn a_transport_offers_no_security_or_carried_credential_unless_it_says_so() {
     use super::{RouterClientTransport, ServerTransport};
     use crate::testing::SteppingClock;
-    use crate::testing::clockless::Clockless;
-    use crate::testing::scripted::{ScriptedClient, ScriptedServer, handle_of};
+    use crate::testing::scripted::handle_of;
 
     let clock = SteppingClock::new(crate::testing::instants::new_year());
-    let client = Clockless(ScriptedClient::new(Arc::<SteppingClock>::clone(&clock)));
-    let server = Clockless(ScriptedServer::new(clock));
+    let client = Bare(ScriptedClient::new(Arc::<SteppingClock>::clone(&clock)));
+    let server = Bare(ScriptedServer::new(clock));
     let handle = handle_of(1);
 
     assert!(

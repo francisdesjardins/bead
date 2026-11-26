@@ -3836,15 +3836,12 @@ async fn holds_its_close_timeout_to_a_whole_number_of_milliseconds_rounded_refus
     let shared: SharedClock = Arc::<SteppingClock>::clone(&clock);
 
     assert!(
-        stepping_client(&clock)
-            .clock()
-            .is_some_and(|given| Arc::ptr_eq(&given, &shared)),
+        Arc::ptr_eq(&stepping_client(&clock).clock(), &shared),
         "the clock it was given"
     );
-    assert!(
-        client()
-            .clock()
-            .is_some_and(|platform| platform.description() == "the platform's"),
+    assert_eq!(
+        client().clock().description(),
+        "the platform's",
         "none given"
     );
 

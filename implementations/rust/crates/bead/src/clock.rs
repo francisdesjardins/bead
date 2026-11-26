@@ -317,8 +317,8 @@ pub(crate) fn is_same(first: &SharedClock, second: &SharedClock) -> bool {
 /// A layer built on another, as its clock is chosen: the clock beneath it and the one it was given,
 /// each by its name, and the two layers' names.
 pub(crate) struct LayeredClocks<'clocks> {
-    /// The clock of the layer beneath, when it has one.
-    pub(crate) beneath: Option<&'clocks SharedClock>,
+    /// The clock of the layer beneath.
+    pub(crate) beneath: &'clocks SharedClock,
     /// The clock the layer was given, when it was.
     pub(crate) given: Option<&'clocks SharedClock>,
     /// The layer's name, as a refusal names it: in the singular, which the refusal's verbs agree
@@ -328,16 +328,13 @@ pub(crate) struct LayeredClocks<'clocks> {
     pub(crate) below: &'clocks str,
 }
 
-/// The clock of a layer built on another: the one beneath it, unless it was given one — the one
-/// given when there is none beneath.
+/// The clock of a layer built on another: the one beneath it, which one it was given must be.
 ///
 /// # Errors
 ///
 /// A [`ProgrammerError`] naming both layers and describing each clock when one given differs from
 /// the one beneath.
-pub(crate) fn clock_of(
-    layered: &LayeredClocks<'_>,
-) -> Result<Option<SharedClock>, ProgrammerError> {
+pub(crate) fn clock_of(layered: &LayeredClocks<'_>) -> Result<SharedClock, ProgrammerError> {
     let LayeredClocks {
         beneath,
         given,
@@ -345,15 +342,12 @@ pub(crate) fn clock_of(
         below,
     } = *layered;
 
-    match (beneath, given) {
-        (Some(beneath), Some(given)) if !is_same(beneath, given) => {
-            Err(ProgrammerError::new(format!(
-                "{layer} runs on the clock of {below}, {}, and was given another, {}",
-                beneath.description(),
-                given.description()
-            )))
-        }
-        (Some(clock), _) | (None, Some(clock)) => Ok(Some(Arc::clone(clock))),
-        (None, None) => Ok(None),
+    match given {
+        Some(given) if !is_same(beneath, given) => Err(ProgrammerError::new(format!(
+            "{layer} runs on the clock of {below}, {}, and was given another, {}",
+            beneath.description(),
+            given.description()
+        ))),
+        _ => Ok(Arc::clone(beneath)),
     }
 }

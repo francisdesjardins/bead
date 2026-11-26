@@ -63,7 +63,7 @@ impl ServerTransport for Wire {
         self.transport.resume(handle);
     }
 
-    fn clock(&self) -> Option<SharedClock> {
+    fn clock(&self) -> SharedClock {
         self.transport.clock()
     }
 

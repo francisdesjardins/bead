@@ -442,9 +442,9 @@ fn locked<T>(mutex: &std::sync::Mutex<T>) -> std::sync::MutexGuard<'_, T> {
         .unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 
-// a transport server of two connections, which records what it sends
-#[derive(Default)]
+// a transport server of two connections, on its vector's clock, which records what it sends
 struct Recording {
+    clock: SharedClock,
     sent: std::sync::Mutex<Vec<(ConnectionHandle, Bytes)>>,
     listeners: std::sync::Mutex<Vec<Arc<dyn ServerListener>>>,
 }
@@ -492,6 +492,10 @@ impl ServerTransport for Recording {
     fn pause(&self, _connection_handle: &ConnectionHandle) {}
 
     fn resume(&self, _connection_handle: &ConnectionHandle) {}
+
+    fn clock(&self) -> SharedClock {
+        Arc::clone(&self.clock)
+    }
 
     fn is_secure(&self, _connection_handle: &ConnectionHandle) -> bool {
         true
@@ -584,7 +588,11 @@ async fn refused_credential(vector: &CredentialRefusalVector) -> Result<(), Fail
         ));
     }
 
-    let transport = Arc::new(Recording::default());
+    let transport = Arc::new(Recording {
+        clock: Arc::clone(&shared),
+        sent: std::sync::Mutex::default(),
+        listeners: std::sync::Mutex::default(),
+    });
     let mut options = ServerOptions::default();
 
     options.clock = Some(Arc::clone(&shared));

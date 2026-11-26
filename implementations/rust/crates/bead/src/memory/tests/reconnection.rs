@@ -51,10 +51,7 @@ async fn waits_its_delay_after_each_failed_attempt_on_the_clock_its_transport_ru
     reconnecting.await.expect("settled").expect("connected");
     assert_eq!(attempts(&client), 3);
     assert!(Arc::ptr_eq(&client.inner.clock, &ends.shared));
-    assert!(Arc::ptr_eq(
-        &client.clock().expect("the supplied clock"),
-        &ends.shared
-    ));
+    assert!(Arc::ptr_eq(&client.clock(), &ends.shared));
     let defaulted =
         super::MemoryTransportClient::new(&super::MemoryTransportClientOptions::default())
             .expect("a client on the platform's clock");

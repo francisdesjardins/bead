@@ -10,7 +10,7 @@ use std::time::SystemTime;
 
 use tokio::runtime::Handle;
 
-use crate::clock::{LayeredClocks, SharedClock, SystemClock, Timer, clock_of};
+use crate::clock::{LayeredClocks, SharedClock, Timer, clock_of};
 use crate::constants::ProtocolCode;
 use crate::credentials::Credentials;
 use crate::duration::{NEVER, hold};
@@ -1221,28 +1221,23 @@ impl Server {
             "a connection's inactivity timeout",
             options.connection_inactivity_timeout.unwrap_or(NEVER),
         )?;
-        // * one clock for every layer: the transport's, or the one given, which the sessions and
-        // the router are both handed
+        // * one clock for every layer: the transport's, which the sessions and the router are
+        // both handed
         let runtime = crate::platform::runtime_of(options.runtime.as_ref(), "a router")?;
-        #[expect(
-            clippy::disallowed_methods,
-            reason = "where a stack starts: its platform's clock"
-        )]
         let clock = clock_of(&LayeredClocks {
-            beneath: transport.clock().as_ref(),
+            beneath: &transport.clock(),
             given: options.clock.as_ref(),
             layer: "a server",
             below: "its transport",
-        })?
-        .unwrap_or_else(|| -> SharedClock { Arc::new(SystemClock::on(runtime.clone())) });
+        })?;
         let sessions_options = options.sessions.clone().unwrap_or_default();
         let sessions = SessionState::new(&SessionManagerOptions {
-            clock: clock_of(&LayeredClocks {
-                beneath: Some(&clock),
+            clock: Some(clock_of(&LayeredClocks {
+                beneath: &clock,
                 given: sessions_options.clock.as_ref(),
                 layer: "a server's session manager",
                 below: "its server",
-            })?,
+            })?),
             ..sessions_options
         })?;
         let listeners: Arc<Listened<SessionListener>> = Arc::default();

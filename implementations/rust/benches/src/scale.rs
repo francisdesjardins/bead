@@ -85,8 +85,8 @@ impl ServerTransport for Stage {
 
     fn resume(&self, _connection_handle: &ConnectionHandle) {}
 
-    fn clock(&self) -> Option<SharedClock> {
-        Some(Arc::clone(&self.clock))
+    fn clock(&self) -> SharedClock {
+        Arc::clone(&self.clock)
     }
 
     fn stop(&self) -> BoxFuture<Result<(), RouterError>> {

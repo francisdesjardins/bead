@@ -2783,8 +2783,8 @@ impl ServerTransport for HttpTransportServer {
         }
     }
 
-    fn clock(&self) -> Option<SharedClock> {
-        Some(Arc::clone(&self.inner.clock))
+    fn clock(&self) -> SharedClock {
+        Arc::clone(&self.inner.clock)
     }
 
     // its client said at connect that it listens: the server may send of its own

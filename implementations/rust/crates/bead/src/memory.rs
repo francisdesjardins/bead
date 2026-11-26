@@ -502,8 +502,8 @@ impl ServerTransport for MemoryTransportServer {
         }
     }
 
-    fn clock(&self) -> Option<SharedClock> {
-        Some(Arc::clone(&self.inner.clock))
+    fn clock(&self) -> SharedClock {
+        Arc::clone(&self.inner.clock)
     }
 
     fn is_secure(&self, _connection_handle: &ConnectionHandle) -> bool {
@@ -1488,8 +1488,8 @@ impl RouterClientTransport for MemoryTransportClient {
         }
     }
 
-    fn clock(&self) -> Option<SharedClock> {
-        Some(Arc::clone(&self.inner.clock))
+    fn clock(&self) -> SharedClock {
+        Arc::clone(&self.inner.clock)
     }
 
     fn is_secure(&self) -> bool {

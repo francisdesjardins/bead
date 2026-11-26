@@ -126,13 +126,13 @@ impl Script {
     }
 }
 
-/// A transport server of the connections a conversation names, each under a handle of its own: it
-/// records what it sends on each, with the credential it is given beside it, delivers what it is
-/// given, and says what each carries and the procedures it takes, as its open declared; it names
-/// procedures when an open of its conversation gives them, which its router asks once, as it is
-/// built.
-#[derive(Default)]
+/// A transport server of the connections a conversation names, each under a handle of its own, on
+/// its conversation's clock: it records what it sends on each, with the credential it is given
+/// beside it, delivers what it is given, and says what each carries and the procedures it takes, as
+/// its open declared; it names procedures when an open of its conversation gives them, which its
+/// router asks once, as it is built.
 struct Scripted {
+    clock: SharedClock,
     script: Mutex<Script>,
     listeners: Mutex<Vec<Arc<dyn ServerListener>>>,
     names_procedures: bool,
@@ -211,6 +211,10 @@ impl ServerTransport for Scripted {
     fn pause(&self, _connection_handle: &ConnectionHandle) {}
 
     fn resume(&self, _connection_handle: &ConnectionHandle) {}
+
+    fn clock(&self) -> SharedClock {
+        Arc::clone(&self.clock)
+    }
 
     fn is_two_way(&self, connection_handle: &ConnectionHandle) -> bool {
         !locked(&self.script).one_way.contains(connection_handle)
@@ -1263,8 +1267,10 @@ pub(crate) async fn play(conversation: &Value, options: &PlayOptions) -> Result<
         }))
     } else {
         Connections::Scripted(Arc::new(Scripted {
+            clock: Arc::clone(&shared),
+            script: Mutex::default(),
+            listeners: Mutex::default(),
             names_procedures: steps.iter().any(|step| step.get("procedures").is_some()),
-            ..Scripted::default()
         }))
     };
     let limits = limits_of(conversation)?;

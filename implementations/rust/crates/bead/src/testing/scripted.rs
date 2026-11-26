@@ -489,8 +489,8 @@ impl RouterClientTransport for ScriptedClient {
         }
     }
 
-    fn clock(&self) -> Option<SharedClock> {
-        Some(Arc::clone(&self.clock))
+    fn clock(&self) -> SharedClock {
+        Arc::clone(&self.clock)
     }
 
     fn is_secure(&self) -> bool {
@@ -883,8 +883,8 @@ impl ServerTransport for ScriptedServer {
         assert!(!self.is_pacing_broken.load(Ordering::SeqCst), "no resume");
     }
 
-    fn clock(&self) -> Option<SharedClock> {
-        Some(Arc::clone(&self.clock))
+    fn clock(&self) -> SharedClock {
+        Arc::clone(&self.clock)
     }
 
     fn is_two_way(&self, connection_handle: &ConnectionHandle) -> bool {

@@ -1389,8 +1389,8 @@ impl RouterClientTransport for WebSocketTransportClient {
         }
     }
 
-    fn clock(&self) -> Option<SharedClock> {
-        Some(Arc::clone(&self.inner.clock))
+    fn clock(&self) -> SharedClock {
+        Arc::clone(&self.inner.clock)
     }
 
     // * judged from the options of its last connect, never from what its host resolves to (spec
