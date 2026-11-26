@@ -1225,7 +1225,8 @@ the release's version, attested and signed ([0055](docs/decisions/0055-beadcs-im
 are pushed at once, and the release then dispatches it on the tag.
 
 Before `prepare`, the release moves by hand the pins of beadc's image and its lint: the Dockerfile
-frontend's and the Node base's (`NODE_DIGEST`) digests in `builder/Dockerfile` and shellcheck's
+frontend's and the distroless base's (`BASE_DIGEST` and `DEBUG_DIGEST`) digests in `builder/Dockerfile`, with
+`NODE_VERSION` to the Node the base's digest then holds, and shellcheck's
 image's in `ci.yml`, each to its tag's current digest, on which CI then builds and tests the image;
 and in `image.yml`, buildx's version and BuildKit's image, by its version and its digest, to those
 GitHub's runners hold.

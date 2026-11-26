@@ -395,7 +395,8 @@ schema and the interop's blueprint in `spec/`; the rules, the name rules of a bl
 leaves to the builder, and what each option means, in `builder/README.md`; the repository's own
 `beadc.yaml` at the root. beadc builds into an image, `ghcr.io/francisdesjardins/beadc`, published at
 each release ([0055](0055-beadcs-image-is-published-at-each-release-under-its-version-attested-and-signed.md)), for linux/amd64 and linux/arm64, each built and tested natively in CI, from `builder/Dockerfile` on a
-Node base pinned by its digest, and tested on itself: Node, beadc as `builder/` holds it with its
+distroless Node base pinned by its digest, with no shell and no package manager, and tested on
+itself: Node, beadc as `builder/` holds it with its
 production packages, buf, protoc-gen-es, protoc at its pin with its well-known types,
 `bead/options.proto`, the files of `spec/` beadc reads at their places beside it, and the licence
 texts of what it adds to its base; no SDK. Its own user is not root; the wrappers `beadc.sh`
@@ -468,8 +469,8 @@ holds.
 **One toolchain more.** `builder/` has its own lockfile, its own vendored Yarn and its own CI job,
 on Linux and Windows; its install fetches buf's binary for its platform, about 105 MiB on Windows.
 
-**The image weighs 128 MB compressed** on amd64, 405 MB on disk: Node 26's binary is 143 MB of it,
-buf's package 106 MB, protoplugin's TypeScript 32 MB.
+**The image weighs 106 MB compressed** on amd64, 330 MB on disk: Node 26's binary is 150 MB of it,
+buf's package 97 MB, protoplugin's TypeScript 32 MB.
 
 **`erasable_syntax` is protoc-gen-es's experimental option**, and its output needs
 `@bufbuild/protobuf` 2.13.0 or later, which the header names; the image pins protoc-gen-es, and

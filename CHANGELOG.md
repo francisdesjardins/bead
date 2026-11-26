@@ -17,6 +17,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- beadc's image is distroless, on `gcr.io/distroless/nodejs26-debian13`: the same Node 26.13.1, with
+  no shell, no package manager, no npm and no Corepack.
 - The page's bar, where its contents are a sheet, holds the mark alone at its left, then the
   section being read, a button that opens the contents, then the demo and the theme. The language
   moves to the contents' foot, English and Français written out, the page's own marked; on a

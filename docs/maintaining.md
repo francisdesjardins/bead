@@ -367,7 +367,8 @@ file, a key or a property was added
    ([bead-adversarial-review](#bead-adversarial-review)): a blocker stops the version.
 2. **Start.** From `develop`: `git flow release start X.Y.Z`.
 3. **The digests.** Move by hand, each to its tag's current digest, the Dockerfile frontend's and
-   the Node base's (`NODE_DIGEST`) in `builder/Dockerfile`, and shellcheck's image in `ci.yml`.
+   the distroless base's (`BASE_DIGEST` and `DEBUG_DIGEST`) in `builder/Dockerfile`, with
+   `NODE_VERSION` to the Node the base's digest then holds, and shellcheck's image in `ci.yml`.
 4. **Prepare.**
 
    ```sh
