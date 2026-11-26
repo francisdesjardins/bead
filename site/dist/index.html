@@ -2354,7 +2354,7 @@ data: {"code":2,"scope":"application","status":400,"title":"COUNTED","type":"htt
         Codes each MQTT 5 acknowledgement names.</li>
       <li><strong>The conversations</strong>: 210, each a script between
         clients and the interop server, relays included.</li>
-      <li><strong>The transports’ cases</strong>: 318, each at a
+      <li><strong>The transports’ cases</strong>: 319, each at a
         transport’s edge, over HTTP, over WebSocket and over a broker, written byte by byte.</li>
       <li><strong>The durations</strong>: 36 places that take a duration,
         and what each makes of 19 inputs.</li>
@@ -2947,7 +2947,7 @@ bead_server_call_started_total{service="1",procedure="echo",type="request"} 9</c
           <tr>
             <td><code>headersTimeout</code></td>
             <td class="code-num">30 s</td>
-            <td>The time a request’s head has to come</td>
+            <td>The time a request’s head has to come, and an idle socket stays</td>
           </tr>
           <tr>
             <td><code>minimumBodyBytesPerSecond</code></td>
@@ -3853,7 +3853,8 @@ message CountDownRequest {
     <summary>A request’s timeouts, and WebSocket’s handshake</summary>
     <p>
       A request’s head must come whole within 30 s, <code>headersTimeout</code>, or the HTTP server
-      answers 408 before the transport reads anything, unmarked. A body must come at 240 bytes a second at least, past a grace of 5 s, or it
+      answers 408 before the transport reads anything, unmarked. A socket or an HTTP/2 session with
+      nothing under way, or a TLS handshake, closes past the same 30 s. A body must come at 240 bytes a second at least, past a grace of 5 s, or it
       receives 408 <code>too-slow</code>. A field that holds a control character other than a tab,
       or a byte past ASCII, is refused before anything else, 400 unmarked over HTTP/1.1 (§15.12).
     </p>
@@ -4681,7 +4682,7 @@ data: {"code":2,"scope":"application","status":400,"title":"COUNTED","type":"htt
         à l’octet ; et les Reason Codes que nomme chaque accusé de MQTT 5.</li>
       <li><strong>Les conversations</strong> : 210, chacune un script entre
         des clients et le serveur d’interop, relais compris.</li>
-      <li><strong>Les cas des transports</strong> : 318, chacun au bord
+      <li><strong>Les cas des transports</strong> : 319, chacun au bord
         d’un transport, sur HTTP, sur WebSocket et sur un courtier, écrit octet par octet.</li>
       <li><strong>Les durées</strong> : 36 endroits qui prennent une
         durée, et ce que chacun fait de 19 entrées.</li>
@@ -5300,7 +5301,7 @@ bead_server_call_started_total{service="1",procedure="echo",type="request"} 9</c
           <tr>
             <td><code>headersTimeout</code></td>
             <td class="code-num">30 s</td>
-            <td>Le temps qu’a la tête d’une requête pour venir</td>
+            <td>Le temps qu’a la tête d’une requête pour venir, et que reste un socket inactif</td>
           </tr>
           <tr>
             <td><code>minimumBodyBytesPerSecond</code></td>
@@ -6227,7 +6228,8 @@ message CountDownRequest {
     <summary>Les délais d’une requête, et la poignée de main de WebSocket</summary>
     <p>
       La tête d’une requête doit venir entière en 30 s, <code>headersTimeout</code>, sinon le
-      serveur HTTP répond 408 avant que le transport en lise quoi que ce soit, non marqué. Un corps doit venir à 240 octets par seconde au moins, passé un délai de
+      serveur HTTP répond 408 avant que le transport en lise quoi que ce soit, non marqué. Un socket ou une session HTTP/2
+      sans rien en cours, ou une poignée de main TLS, se ferme passé les mêmes 30 s. Un corps doit venir à 240 octets par seconde au moins, passé un délai de
       grâce de 5 s, sinon il reçoit 408 <code>too-slow</code>. Un champ qui porte un caractère de
       contrôle autre qu’une tabulation, ou un octet au-delà de l’ASCII, est refusé avant tout le
       reste, 400 non marqué sur HTTP/1.1 (§15.12).

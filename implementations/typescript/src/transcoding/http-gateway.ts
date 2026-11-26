@@ -80,7 +80,9 @@ import {
 } from '../transport/server/http-server-fields';
 import {
   answerBeforeClose,
+  boundHandshakeOf,
   boundHeadOf,
+  boundSessionOf,
   createSendPace,
   HEADERS_TIMEOUT,
   MAXIMUM_CONNECTIONS,
@@ -148,6 +150,9 @@ export interface IHTTPGatewayOptions extends IHTTPPolicyOptions, IHTTPPolicyOpti
   /**
    * Builds its own listener, `node:http`'s `createServer` or `node:http2`'s, for `start`; none, and
    * it answers as a handler alone, `listener`, which an application mounts on a server of its own.
+   * The gateway sets its `headersTimeout` and its `keepAliveTimeout` to its own `headersTimeout`,
+   * its `requestTimeout` to 0 and its `connectionsCheckingInterval` to a second, where the server
+   * has them, and times each HTTP/2 session and each TLS handshake to its `headersTimeout` itself.
    */
   readonly createServer?:
     | ((listener: HTTPRequestListener, options: { address: string }) => IHTTPServerLike)
@@ -2088,8 +2093,14 @@ export const createHTTPGateway = (given: IHTTPGatewayOptions): IHTTPGateway => {
           instance.close();
         };
 
+        // its head, a kept-alive socket, an HTTP/2 session and a TLS handshake each within
+        // `headersTimeout` (spec 15.12)
         boundHeadOf(instance, headersTimeout);
+        boundHandshakeOf(instance, { headersTimeout, platform });
         answerBeforeClose(instance);
+        instance.on('session', (session) => {
+          boundSessionOf(session, { headersTimeout, platform });
+        });
         listening.add(instance);
 
         return new Promise((resolve, reject) => {

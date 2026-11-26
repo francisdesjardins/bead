@@ -467,6 +467,33 @@ export const closingAnswerOf = async (port: number, octets: string) => {
   ];
 };
 
+/**
+ * When `socket` closes, in milliseconds from the call, or `undefined` when it is still open
+ * `within` milliseconds later: what a test of an idle bound reads against its floor and its
+ * ceiling.
+ */
+export const closedAfter = (
+  socket: { once(event: 'close', listener: () => void): unknown },
+  within = 5_000
+): Promise<number | undefined> => {
+  const from = performance.now();
+
+  return Promise.race([
+    new Promise<number>((resolve) => {
+      socket.once('close', () => {
+        resolve(performance.now() - from);
+      });
+    }),
+    sleep(within, undefined, { ref: false }),
+  ]);
+};
+
+/** Whether `elapsed`, what {@link closedAfter} read, is within an idle bound of 1 s: 900 to 5000. */
+export const expectIdleEnd = (elapsed: number | undefined, what = 'its end'): void => {
+  expect(elapsed, what).toBeGreaterThanOrEqual(900);
+  expect(elapsed, what).toBeLessThanOrEqual(5_000);
+};
+
 /** A POST's head on a connection, declaring `length` bytes of body. */
 export const postHeadOf = (connectionToken: string, length: number): string => {
   return (

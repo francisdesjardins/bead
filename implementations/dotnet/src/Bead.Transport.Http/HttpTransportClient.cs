@@ -743,8 +743,8 @@ public sealed class HttpTransportClient : IRouterClientTransport, IAsyncDisposab
 
     // its own handler races the address families of a name, as RFC 8305 asks, where the
     // platform's tries each address in turn, connects a host on the loopback to the loopback itself
-    // through no proxy, and speaks its TLS, whose credentials `tls` hands back to be let go of with
-    // the HTTP client
+    // through no proxy, lets a pooled connection go once idle 4 s, and speaks its TLS, whose
+    // credentials `tls` hands back to be let go of with the HTTP client
     private HttpClient NewHttp(out TlsCredentials? tls)
     {
         tls = null;
@@ -754,7 +754,7 @@ public sealed class HttpTransportClient : IRouterClientTransport, IAsyncDisposab
             return new HttpClient(handler, disposeHandler: false) { Timeout = Timeout.InfiniteTimeSpan };
         }
 
-        var own = new SocketsHttpHandler { AllowAutoRedirect = false, ConnectCallback = HappyEyeballs.ConnectCallbackOn(_platform), Proxy = LoopbackBypassProxy.Instance };
+        var own = new SocketsHttpHandler { AllowAutoRedirect = false, ConnectCallback = HappyEyeballs.ConnectCallbackOn(_platform), Proxy = LoopbackBypassProxy.Instance, PooledConnectionIdleTimeout = HttpPool.IdleTimeout };
 
         if (_options.Tls is { } given)
         {

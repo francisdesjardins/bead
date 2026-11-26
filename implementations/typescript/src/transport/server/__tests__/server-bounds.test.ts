@@ -1,11 +1,13 @@
 import { EventEmitter } from 'node:events';
 import { expect, test } from '@playwright/test';
 import { GenericError, ProgrammerError } from '../../shared/errors';
-import { createTestClock, hasRef } from '../../shared/__tests__/fixtures';
+import { createTestClock, delaysOn, hasRef } from '../../shared/__tests__/fixtures';
 import {
   answerBeforeClose,
   assertCount,
+  boundHandshakeOf,
   boundHeadOf,
+  boundSessionOf,
   createSendPace,
   droppedOf,
   HEADERS_TIMEOUT,
@@ -34,6 +36,42 @@ const createLingeringSocket = () => {
 
   return socket;
 };
+
+/** An HTTP/2 session as an idle bound holds it: its closes and its destroys counted. */
+const createBoundSession = () => {
+  const session = Object.assign(new EventEmitter(), {
+    close: () => {
+      session.closes += 1;
+    },
+    closes: 0,
+    destroy: () => {
+      session.destroys += 1;
+    },
+    destroys: 0,
+  });
+
+  return session;
+};
+
+/** A raw socket a TLS server hands its `connection`, from `127.0.0.1` and `remotePort`. */
+const createPeerSocket = (remotePort: number) => {
+  const socket = Object.assign(new EventEmitter(), {
+    destroy: () => {
+      socket.destroys += 1;
+    },
+    destroys: 0,
+    remoteAddress: '127.0.0.1',
+    remotePort,
+    write: (data: unknown) => {
+      socket.written.push(data);
+    },
+    written: [] as unknown[],
+  });
+
+  return socket;
+};
+
+type PeerSocket = ReturnType<typeof createPeerSocket>;
 
 // definition
 
@@ -193,20 +231,161 @@ test.describe('assertCount', () => {
 });
 
 test.describe('boundHeadOf', () => {
-  test('sets a server’s headersTimeout, no requestTimeout and a check each second, and leaves one without them as it is', () => {
+  test('sets a server’s headersTimeout and keepAliveTimeout, no requestTimeout and a check each second, and leaves one without them as it is', () => {
     const http1 = {
       connectionsCheckingInterval: 30_000,
       headersTimeout: 60_000,
+      keepAliveTimeout: 5_000,
       requestTimeout: 300_000,
     };
+    // * `node:http2`'s secure server with `allowHTTP1` on Node 24, which has no keepAliveTimeout
+    const secure = { connectionsCheckingInterval: 30_000, headersTimeout: 60_000 };
     const http2 = {};
 
     boundHeadOf(http1, 1_234);
+    boundHeadOf(secure, 1_234);
     boundHeadOf(http2, 1_234);
 
-    expect([http1, http2]).toEqual([
-      { connectionsCheckingInterval: 1_000, headersTimeout: 1_234, requestTimeout: 0 },
+    expect([http1, secure, http2]).toEqual([
+      {
+        connectionsCheckingInterval: 1_000,
+        headersTimeout: 1_234,
+        keepAliveTimeout: 1_234,
+        requestTimeout: 0,
+      },
+      {
+        connectionsCheckingInterval: 1_000,
+        headersTimeout: 1_234,
+        keepAliveTimeout: 1_234,
+        requestTimeout: 0,
+      },
       {},
+    ]);
+  });
+});
+
+test.describe('boundSessionOf', () => {
+  test('holds an HTTP/2 session to headers timeout from its call, stopped by a stream, run again in full once its last stream closes, a reset one among them, a PING moving nothing', async () => {
+    const platform = createTestClock();
+    const session = createBoundSession();
+    const [first, second] = [new EventEmitter(), new EventEmitter()];
+
+    boundSessionOf(session, { headersTimeout: 1_000, platform });
+
+    // armed at the call, keeping no process alive
+    expect(
+      platform.armed.map(({ delay, handle }) => {
+        return [delay, hasRef(handle)];
+      })
+    ).toEqual([[1_000, false]]);
+
+    await platform.tickAsync(999);
+    session.emit('stream', first);
+
+    expect(delaysOn(platform)).toEqual([]);
+
+    await platform.tickAsync(5_000);
+    session.emit('stream', second);
+    first.emit('close');
+    await platform.tickAsync(5_000);
+
+    expect([session.closes, delaysOn(platform)]).toEqual([0, []]);
+
+    // the last stream reset: its close is its end, and the time runs again in full
+    second.emit('close');
+    await platform.tickAsync(999);
+    session.emit('ping');
+    session.emit('remoteSettings');
+
+    expect([session.closes, delaysOn(platform)]).toEqual([0, [1_000]]);
+
+    await platform.tickAsync(1);
+
+    expect([session.closes, session.destroys]).toEqual([1, 0]);
+  });
+
+  test('destroys a session that has not closed 2 s past its close, and arms nothing more once it closed', async () => {
+    const platform = createTestClock();
+    const lingering = createBoundSession();
+    const closing = createBoundSession();
+    const closed = createBoundSession();
+
+    for (const session of [lingering, closing, closed]) {
+      boundSessionOf(session, { headersTimeout: 1_000, platform });
+    }
+
+    // one ended before its time: nothing of it fires
+    closed.emit('close');
+    await platform.tickAsync(1_000);
+
+    expect([lingering.closes, closing.closes, closed.closes]).toEqual([1, 1, 0]);
+
+    closing.emit('close');
+    await platform.tickAsync(1_999);
+
+    expect([lingering.destroys, closing.destroys]).toEqual([0, 0]);
+
+    await platform.tickAsync(1);
+
+    expect([lingering.destroys, closing.destroys]).toEqual([1, 0]);
+
+    // a stream that ends once the session closed runs nothing again
+    const stream = new EventEmitter();
+
+    closed.emit('stream', stream);
+    stream.emit('close');
+
+    expect(delaysOn(platform)).toEqual([]);
+  });
+});
+
+test.describe('boundHandshakeOf', () => {
+  test('destroys a socket whose TLS handshake has not ended within headers timeout, nothing written, keeps one whose handshake ended or that closed, and leaves a server not under TLS as it is', async () => {
+    const platform = createTestClock();
+    const secure = Object.assign(new EventEmitter(), { setSecureContext: () => {} });
+    const clear = new EventEmitter();
+    const [silent, shaken, gone] = [1, 2, 3].map((remotePort) => {
+      return createPeerSocket(remotePort);
+    }) as [PeerSocket, PeerSocket, PeerSocket];
+
+    boundHandshakeOf(secure, { headersTimeout: 1_000, platform });
+    boundHandshakeOf(clear, { headersTimeout: 1_000, platform });
+
+    expect(clear.eventNames()).toEqual([]);
+
+    for (const socket of [silent, shaken, gone]) {
+      secure.emit('connection', socket);
+    }
+
+    // the TLS socket its handshake gives is another object, of the same peer
+    secure.emit('secureConnection', { remoteAddress: '127.0.0.1', remotePort: 2 });
+    gone.emit('close');
+
+    expect(
+      platform.armed.map(({ delay, handle }) => {
+        return [delay, hasRef(handle)];
+      })
+    ).toEqual([
+      [1_000, false],
+      [1_000, false],
+      [1_000, false],
+    ]);
+
+    await platform.tickAsync(999);
+
+    // the silent socket's alone
+    expect([silent.destroys, delaysOn(platform)]).toEqual([0, [1_000]]);
+
+    await platform.tickAsync(1);
+
+    expect(
+      [silent, shaken, gone].map(({ destroys, written }) => {
+        return [destroys, written];
+      })
+    ).toEqual([
+      [1, []],
+      [0, []],
+      [0, []],
     ]);
   });
 });

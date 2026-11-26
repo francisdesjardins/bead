@@ -7306,3 +7306,157 @@ async fn writes_its_comment_a_heartbeat_after_its_last_write_and_none_while_writ
     drop(body);
     fixture.dispose().await.expect("disposed");
 }
+
+// ── Its idle sockets ──────────────────────────────────────────────────────────
+
+// the headers timeout the tests of an idle socket's end run, and where that end falls from where
+// its count starts: none before its floor, one within its ceiling (spec 15.12)
+const IDLE_TIMEOUT: Duration = Duration::from_millis(1_000);
+const IDLE_FLOOR: Duration = Duration::from_millis(900);
+const IDLE_CEILING: Duration = Duration::from_millis(5_000);
+
+// a gateway of the file's defaults on its own listener, its headers timeout the idle tests', under
+// the fixture's TLS where `is_tls`
+async fn idle_gateway(is_tls: bool) -> TranscodingFixture {
+    started_with((
+        move |options: &mut HttpGatewayOptions| {
+            options.headers_timeout = Some(IDLE_TIMEOUT);
+
+            if is_tls {
+                options.tls =
+                    Some(bead::testing::tls::server_config().expect("the server's config"));
+            }
+        },
+        true,
+    ))
+    .await
+}
+
+// reads `stream` until its end, within twice the patience: how long that end took from `from`,
+// none when it never came, and what was read before it
+async fn idle_end_of<S: tokio::io::AsyncRead + Unpin>(
+    stream: &mut S,
+    from: bead::testing::Instant,
+) -> (Option<Duration>, Vec<u8>) {
+    use tokio::io::AsyncReadExt as _;
+
+    let mut came = Vec::new();
+    let mut buffer = vec![0_u8; 16_384];
+    let ended = patience(PATIENCE.saturating_mul(2), async {
+        while let Ok(count) = stream.read(&mut buffer).await
+            && count > 0
+        {
+            came.extend_from_slice(&buffer[..count]);
+        }
+    })
+    .await;
+
+    (ended.ok().map(|()| from.elapsed()), came)
+}
+
+// an idle socket's end, `took` past where its count started: none before its floor, one within
+// its ceiling
+fn assert_idle_end(took: Option<Duration>, what: &str) {
+    assert!(took.is_some(), "{what}: no end within patience");
+
+    let took = took.unwrap_or_default();
+
+    assert!(
+        took >= IDLE_FLOOR,
+        "{what}: ended {took:?} in, before {IDLE_FLOOR:?}"
+    );
+    assert!(
+        took <= IDLE_CEILING,
+        "{what}: ended {took:?} in, past {IDLE_CEILING:?}"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn closes_a_kept_alive_socket_idle_past_headers_timeout_at_its_own_listener_without_another_response()
+ {
+    use tokio::io::AsyncReadExt as _;
+
+    let fixture = idle_gateway(false).await;
+    let port = fixture.port;
+    // * a request that keeps its socket, the document's
+    let mut socket = sent(
+        port,
+        format!("GET /openapi.json HTTP/1.1\r\nhost: {HOST}:{port}\r\n\r\n").as_bytes(),
+    )
+    .await;
+    let mut reader = bead::testing::wire::ResponseReader::new();
+    let mut buffer = vec![0_u8; 16_384];
+
+    patience(PATIENCE, async {
+        while reader.response().is_none() && reader.failed().is_none() {
+            match socket.read(&mut buffer).await {
+                Ok(0) | Err(_) => reader.end(),
+                Ok(count) => reader.feed(&buffer[..count]),
+            }
+        }
+    })
+    .await
+    .expect("answered in time");
+    assert_eq!(
+        reader.response().map(|response| response.head.status),
+        Some(200),
+        "its document"
+    );
+
+    let mut came = reader.take_rest();
+    let (took, rest) = idle_end_of(&mut socket, bead::testing::Instant::now()).await;
+
+    came.extend_from_slice(&rest);
+    assert_idle_end(took, "kept alive, idle");
+    assert!(came.is_empty(), "no second response");
+
+    fixture.dispose().await.expect("disposed");
+}
+
+// HTTP/2's connection preface, and an empty SETTINGS frame (RFC 9113 §3.4, §6.5)
+const PREFACE: &[u8] = b"PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n";
+const SETTINGS: &[u8] = &[0, 0, 0, 0x4, 0, 0, 0, 0, 0];
+
+// a socket under the fixture's TLS to the gateway on `port` offering h2, `written` written on it
+// once secured, read until its end: how long that end took from its secure connect
+async fn secure_end_on(port: u16, written: &'static [&'static [u8]]) -> Option<Duration> {
+    use tokio::io::AsyncWriteExt as _;
+
+    let mut config = rustls::ClientConfig::clone(
+        &bead::testing::tls::client_config().expect("the client's config"),
+    );
+
+    config.alpn_protocols = vec![b"h2".to_vec()];
+
+    let socket = tokio::net::TcpStream::connect(address_of(port))
+        .await
+        .expect("a socket to the gateway");
+    let mut secured = tokio_rustls::TlsConnector::from(Arc::new(config))
+        .connect(
+            rustls::pki_types::ServerName::try_from(HOST.to_owned()).expect("a name"),
+            socket,
+        )
+        .await
+        .expect("its handshake");
+    let from = bead::testing::Instant::now();
+
+    for bytes in written {
+        secured.write_all(bytes).await.expect("written");
+    }
+
+    idle_end_of(&mut secured, from).await.0
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn ends_an_http_2_session_at_its_own_listener_that_reads_no_request_s_head_within_headers_timeout()
+ {
+    let fixture = idle_gateway(true).await;
+    // * each watched from its own secure connect, both at once
+    let silent = bead::testing::spawn(secure_end_on(fixture.port, &[]));
+    let settled = bead::testing::spawn(secure_end_on(fixture.port, &[PREFACE, SETTINGS]));
+
+    assert_idle_end(silent.await.expect("watched"), "no preface");
+    assert_idle_end(settled.await.expect("watched"), "no head");
+
+    fixture.dispose().await.expect("disposed");
+}

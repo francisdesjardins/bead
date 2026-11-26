@@ -558,7 +558,7 @@ fn is_token(token: &str) -> bool {
 // what HTTP refuses of its own (RFC 9112 §3.2, §3.2.2; RFC 9110 §5.5), as HTTP answers it,
 // unmarked, with none of the path's fields; over HTTP/2, its stream reset, `PROTOCOL_ERROR`,
 // nothing written (RFC 9113 §8.1.1)
-fn malformed(flow: &Arc<Flow>) -> Response<AnswerBody> {
+fn malformed() -> Response<AnswerBody> {
     let mut response = response_of(
         400,
         (
@@ -566,7 +566,7 @@ fn malformed(flow: &Arc<Flow>) -> Response<AnswerBody> {
                 ("connection", "close".to_owned()),
                 ("content-length", "0".to_owned()),
             ],
-            AnswerBody::whole(None).settling(flow),
+            AnswerBody::whole(None),
         ),
     );
 
@@ -873,7 +873,7 @@ impl ServerInner {
             && fields.has_counted_length()
             && fields.is_transfer_encoding_framed();
         let Some(authority) = is_visible.then(|| fields.authority(&target)).flatten() else {
-            return ready(malformed(&flow));
+            return ready(malformed());
         };
         let authority = authority.authority.map(str::to_owned);
         let facts = Facts {

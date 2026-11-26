@@ -72,8 +72,10 @@ const WAIT: Duration = Duration::from_secs(25);
 const FIRST_RETRY: Duration = Duration::from_secs(1);
 const RETRY_CEILING: Duration = Duration::from_secs(30);
 
-// how long a pooled connection goes unused before its pool closes it: under Node's 5 s
-// `keepAliveTimeout`, as undici keeps 4 s
+// how long a pooled connection goes unused before its pool closes it, as undici keeps 4 s: under
+// Node's 5 s `keepAliveTimeout` and every Bead server's `headersTimeout` at its default (spec
+// 15.12); a server's `headersTimeout` under 5 s races it, as hyper and Kestrel send no
+// `Keep-Alive` hint to read
 pub(crate) const POOL_IDLE_TIMEOUT: Duration = Duration::from_secs(4);
 
 // what a `Retry-After` that says nothing readable asks: the server's own second

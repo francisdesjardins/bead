@@ -69,16 +69,25 @@ import {
   NO_LISTENING_ADDRESSES,
 } from './addresses';
 import { createFakeHTTPServer } from './fake-http-server';
-import { rawResetOverHTTP2 } from './raw-http2';
+import {
+  HEADERS_NEVER_WHOLE,
+  idleEndsOverHTTP2,
+  PING,
+  PREFACE_AND_SETTINGS,
+  rawResetOverHTTP2,
+  tlsSocketOn,
+} from './raw-http2';
 import { TLS_FIXTURE } from './tls-fixture';
 import {
   BEARER,
   PAGE,
   batchOf,
   bytesOf,
+  closedAfter,
   closingAnswerOf,
   connect,
   envelopeOf,
+  expectIdleEnd,
   fieldsOf,
   host,
   MOST_TAKEN,
@@ -99,6 +108,14 @@ import {
   statusesOf,
   takenUntilStalled,
 } from './http-transport-server-fixtures';
+
+// interfaces
+
+/** What a raw socket read, as it came, and whether it closed. */
+interface IRead {
+  isClosed: boolean;
+  text: string;
+}
 
 // helpers
 
@@ -298,16 +315,43 @@ test.describe('createHTTPTransportServer', () => {
     expect(started.server.clients).toEqual([]);
   });
 
-  test('closes an idle kept-alive socket without another response', async () => {
-    await using started = await startTransport({
-      createServer: (listener) => {
-        const server = createServer(listener);
+  // spec 15.12
+  test('closes a kept-alive socket idle past headers timeout without another response', async () => {
+    // * in clear, and under TLS over ALPN http/1.1 on HTTP/2's secure server, no keepAliveTimeout set
+    await using clear = await startTransport({ headersTimeout: 1_000 });
+    await using secure = await startSecure({ headersTimeout: 1_000 });
+    const idleEndOf = async ({ read, socket }: { read: IRead; socket: Socket }) => {
+      try {
+        socket.write(rawConnectOf(host));
+        await expect
+          .poll(() => {
+            return read.text.includes('\r\n\r\n');
+          })
+          .toBe(true);
+        expect(read.text).toMatch(/^HTTP\/1\.1 201 /u);
+        const answer = read.text;
+        const elapsed = await closedAfter(socket);
 
-        server.keepAliveTimeout = 100;
+        return { elapsed, isAnswerAlone: read.text === answer };
+      } finally {
+        socket.destroy();
+      }
+    };
 
-        return server;
-      },
-    });
+    const ends = await Promise.all([
+      idleEndOf(await rawSocketOn(portOf(clear.url))),
+      idleEndOf(await tlsSocketOn(secure.port, 'http/1.1')),
+    ]);
+
+    for (const { elapsed, isAnswerAlone } of ends) {
+      expectIdleEnd(elapsed);
+      expect(isAnswerAlone).toBe(true);
+    }
+  });
+
+  // spec 15.12
+  test('answers 408 a head begun late in a kept-alive socket’s idle span that does not come whole within headers timeout', async () => {
+    await using started = await startTransport({ headersTimeout: 1_000 });
     const { read, socket } = await rawSocketOn(portOf(started.url));
 
     try {
@@ -320,12 +364,28 @@ test.describe('createHTTPTransportServer', () => {
       expect(read.text).toMatch(/^HTTP\/1\.1 201 /u);
       const answer = read.text;
 
+      await sleep(800);
+      // its next head a byte each 300 ms, never whole before its bound
+      const firstByteAt = performance.now();
+
+      for (const byte of rawConnectOf(host)) {
+        if (read.isClosed || read.text !== answer) {
+          break;
+        }
+
+        socket.write(byte);
+        await sleep(300);
+      }
       await expect
         .poll(() => {
-          return read.isClosed;
+          return read.text.slice(answer.length).includes('\r\n\r\n');
         })
         .toBe(true);
-      expect(read.text).toBe(answer);
+
+      expect(performance.now() - firstByteAt).toBeLessThanOrEqual(5_000);
+      expect(read.text.slice(answer.length).split('\r\n')[0]).toBe('HTTP/1.1 408 Request Timeout');
+      // nothing of it handed on: the one connection is the first head's
+      expect(started.server.clients).toHaveLength(1);
     } finally {
       socket.destroy();
     }
@@ -1713,6 +1773,66 @@ const openAnswerOverHTTP2 = (session: ClientHttp2Session, headers: Record<string
   });
 };
 
+/** A connection drawn over HTTP/2 on `session`: its token. */
+const drawnOverHTTP2 = async (session: ClientHttp2Session): Promise<string> => {
+  const drawing = session.request({
+    ':method': 'POST',
+    ':path': '/bead',
+    'content-type': BEAD_MEDIA_TYPE,
+    'content-length': '0',
+  });
+  const drew = new Promise<IncomingHttpHeaders>((resolve) => {
+    drawing.once('response', resolve);
+  });
+
+  drawing.resume();
+  drawing.end();
+  const headers = await drew;
+
+  expect(headers[':status']).toBe(201);
+
+  return String(headers[CONNECTION_TOKEN_HEADER]);
+};
+
+/**
+ * A request of `callId` over HTTP/2 on `session`, on the connection of `token`, once its answer's
+ * head came: its stream, and its body once it ends.
+ */
+const askedOverHTTP2 = async (
+  session: ClientHttp2Session,
+  { callId, token }: { callId: number; token: string }
+) => {
+  const request = envelopeOf(ENVELOPE_KINDS.REQUEST, { callId });
+  const stream = session.request({
+    ':method': 'POST',
+    ':path': '/bead',
+    'content-type': BEAD_MEDIA_TYPE,
+    'content-length': String(request.length),
+    [CONNECTION_TOKEN_HEADER]: token,
+  });
+  const responding = new Promise<IncomingHttpHeaders>((resolve) => {
+    stream.once('response', resolve);
+  });
+  const body = new Promise<Buffer>((resolve, reject) => {
+    const chunks: Buffer[] = [];
+
+    stream.on('data', (chunk: Buffer) => {
+      chunks.push(chunk);
+    });
+    stream.once('end', () => {
+      resolve(Buffer.concat(chunks));
+    });
+    stream.once('error', reject);
+  });
+
+  stream.end(request);
+  const response = await responding;
+
+  expect([response[':status'], response[REFUSAL_HEADER]]).toEqual([200, undefined]);
+
+  return { body, stream };
+};
+
 /** A transport server under TLS, HTTP/2 and HTTP/1.1 on one port, and a session to it. */
 const startSecure = async (options: Partial<IHTTPTransportServerOptions> = {}) => {
   const server = createHTTPTransportServer({
@@ -1740,105 +1860,102 @@ const startSecure = async (options: Partial<IHTTPTransportServerOptions> = {}) =
 };
 
 test.describe('createHTTPTransportServer, over TLS', () => {
+  // spec 15.12
   test('keeps an HTTP/2 session past headers timeout while an answer is under way', async () => {
-    await using started = await startSecure({ headersTimeout: 200 });
+    await using started = await startSecure({ headersTimeout: 1_000 });
     const { server, session } = started;
-    const drawing = session.request({
-      ':method': 'POST',
-      ':path': '/bead',
-      'content-type': BEAD_MEDIA_TYPE,
-      'content-length': '0',
-    });
-    const drew = new Promise<IncomingHttpHeaders>((resolve) => {
-      drawing.once('response', resolve);
-    });
-    drawing.resume();
-    drawing.end();
-    const headers = await drew;
-
-    expect(headers[':status']).toBe(201);
-    const client = server.clients[0];
+    const token = await drawnOverHTTP2(session);
+    const [client] = server.clients;
     if (client === undefined) {
       throw new Error('the connection is drawn');
     }
-    const request = envelopeOf(ENVELOPE_KINDS.REQUEST, { callId: 1 });
     const answer = envelopeOf(ENVELOPE_KINDS.RESULT, { callId: 1 });
-    const asking = session.request({
-      ':method': 'POST',
-      ':path': '/bead',
-      'content-type': BEAD_MEDIA_TYPE,
-      'content-length': String(request.length),
-      [CONNECTION_TOKEN_HEADER]: headers[CONNECTION_TOKEN_HEADER],
-    });
-    const responding = new Promise<IncomingHttpHeaders>((resolve) => {
-      asking.once('response', resolve);
-    });
-    asking.end(request);
-    const response = await responding;
+    const asking = await askedOverHTTP2(session, { callId: 1, token });
 
-    expect(response[':status']).toBe(200);
     // * the answer waits past the head's timeout many times over, and its linger
-    await sleep(3_000);
-    expect([session.closed, session.destroyed, asking.closed]).toEqual([false, false, false]);
-    const body = new Promise<Buffer>((resolve, reject) => {
-      const chunks: Buffer[] = [];
-      asking.on('data', (chunk: Buffer) => {
-        chunks.push(chunk);
-      });
-      asking.once('end', () => {
-        resolve(Buffer.concat(chunks));
-      });
-      asking.once('error', reject);
-    });
+    await sleep(3_500);
+    expect([session.closed, session.destroyed, asking.stream.closed]).toEqual([
+      false,
+      false,
+      false,
+    ]);
     await server.send({ data: answer }, client.connectionHandle);
-    expect(await body).toEqual(Buffer.from(answer));
+    expect(await asking.body).toEqual(Buffer.from(answer));
   });
 
+  // spec 15.12
+  test('keeps an HTTP/2 session for headers timeout past its last answer', async () => {
+    await using started = await startSecure({ headersTimeout: 1_000 });
+    const { server, session } = started;
+    const token = await drawnOverHTTP2(session);
+    const [client] = server.clients;
+    if (client === undefined) {
+      throw new Error('the connection is drawn');
+    }
+    const answerTo = async (callId: number, after: number) => {
+      const asking = await askedOverHTTP2(session, { callId, token });
+
+      await sleep(after);
+      await server.send(
+        { data: envelopeOf(ENVELOPE_KINDS.RESULT, { callId }) },
+        client.connectionHandle
+      );
+      await asking.body;
+      await once(asking.stream, 'close');
+    };
+
+    // its answer under way 1500 ms past its head, then another exchange on the session 800 ms later
+    await answerTo(1, 1_500);
+    await sleep(800);
+    await answerTo(3, 0);
+    expectIdleEnd(await closedAfter(session));
+  });
+
+  // spec 15.12
   test('ends an HTTP/2 session that reads no request’s head within headers timeout, its preface, its settings or its head never whole', async () => {
-    test.skip(
-      true,
-      "divergence: work ahead, docs/support.md's row An idle connection's close: one idle bound over HTTP/1.1 and HTTP/2"
-    );
-    await using started = await startSecure({ headersTimeout: 200 });
-    const settled = Buffer.concat([
-      Buffer.from('PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n'),
-      Buffer.from([0, 0, 0, 4, 0, 0, 0, 0, 0]),
-    ]);
-    const prefixes = [
+    await using started = await startSecure({ headersTimeout: 1_000 });
+    const ends = await idleEndsOverHTTP2(started.port, [
       Buffer.alloc(0),
-      settled,
-      Buffer.concat([settled, Buffer.from([0, 0, 1, 1, 1, 0, 0, 0, 1, 0x82])]),
-    ];
-    const sockets: ReturnType<typeof connectTLS>[] = [];
+      PREFACE_AND_SETTINGS,
+      Buffer.concat([PREFACE_AND_SETTINGS, HEADERS_NEVER_WHOLE]),
+    ]);
+
+    for (const [index, elapsed] of ends.entries()) {
+      expectIdleEnd(elapsed, `socket ${String(index)}`);
+    }
+  });
+
+  // spec 15.12
+  test('ends an HTTP/2 session that only pings within headers timeout', async () => {
+    await using started = await startSecure({ headersTimeout: 1_000 });
+    const { socket } = await tlsSocketOn(started.port, 'h2');
+    const ending = closedAfter(socket);
+
+    socket.write(PREFACE_AND_SETTINGS);
+    const pinging = setInterval(() => {
+      if (socket.writable) {
+        socket.write(PING);
+      }
+    }, 100);
+
     try {
-      const endings: Promise<boolean>[] = [];
-      for (const prefix of prefixes) {
-        const socket = connectTLS({
-          host,
-          port: started.port,
-          ca: TLS_FIXTURE.cert,
-          ALPNProtocols: ['h2'],
-        });
-        sockets.push(socket);
-        socket.on('error', () => {});
-        await once(socket, 'secureConnect');
-        endings.push(
-          Promise.race([
-            new Promise<boolean>((resolve) => {
-              socket.once('close', () => {
-                resolve(true);
-              });
-            }),
-            sleep(5_000, false, { ref: false }),
-          ])
-        );
-        socket.write(prefix);
-      }
-      expect(await Promise.all(endings)).toEqual([true, true, true]);
+      expectIdleEnd(await ending);
     } finally {
-      for (const socket of sockets) {
-        socket.destroy();
-      }
+      clearInterval(pinging);
+      socket.destroy();
+    }
+  });
+
+  // spec 15.12
+  test('closes a TLS socket whose handshake does not end within headers timeout without a word', async () => {
+    await using started = await startSecure({ headersTimeout: 1_000 });
+    const { read, socket } = await rawSocketOn(started.port);
+
+    try {
+      expectIdleEnd(await closedAfter(socket));
+      expect(read.text).toBe('');
+    } finally {
+      socket.destroy();
     }
   });
 
@@ -3403,11 +3520,16 @@ test.describe('createHTTPTransportServer, its edges', () => {
 
     // an HTTP/2 session is kept until it ends, or the server stops
     const sessionOf = () => {
-      return Object.assign(new EventEmitter(), {
+      const session = Object.assign(new EventEmitter(), {
         close: () => {
           closed += 1;
+          // as Node's ends, with nothing under way
+          session.emit('close');
         },
+        destroy: () => {},
       });
+
+      return session;
     };
     const ended = sessionOf();
 
@@ -5628,7 +5750,7 @@ test.describe('createHTTPTransportServer, its bounds', () => {
     }
   });
 
-  test('sets headersTimeout, no requestTimeout and a connectionsCheckingInterval of a second on every server createServer builds, its 408 within a second of its time', async () => {
+  test('sets headersTimeout, keepAliveTimeout, no requestTimeout and a connectionsCheckingInterval of a second on every server createServer builds, its 408 within a second of its time', async () => {
     const built: ReturnType<typeof createServer>[] = [];
     const server = createHTTPTransportServer({
       createServer: (listener) => {
@@ -5646,14 +5768,14 @@ test.describe('createHTTPTransportServer, its bounds', () => {
       // on localhost, one for each loopback
       expect(
         built.map((instance) => {
-          const { connectionsCheckingInterval, headersTimeout, requestTimeout } =
+          const { connectionsCheckingInterval, headersTimeout, keepAliveTimeout, requestTimeout } =
             instance as IHeadBoundServerLike;
 
-          return [headersTimeout, requestTimeout, connectionsCheckingInterval];
+          return [headersTimeout, keepAliveTimeout, requestTimeout, connectionsCheckingInterval];
         })
       ).toEqual([
-        [700, 0, 1_000],
-        [700, 0, 1_000],
+        [700, 700, 0, 1_000],
+        [700, 700, 0, 1_000],
       ]);
 
       const { read, socket } = await rawSocketOn(port);

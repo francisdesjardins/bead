@@ -1973,6 +1973,10 @@ public sealed class HttpGateway : IAsyncDisposable
                 kestrel.Limits.MinResponseDataRate = null;
                 kestrel.Limits.RequestHeadersTimeout = _policy.HeadersTimeout;
 
+                // * a socket with no answer under way reads a head whole within it, or is closed
+                // without a word (spec 15.12)
+                kestrel.Limits.KeepAliveTimeout = _policy.HeadersTimeout;
+
                 foreach (var address in listening.Addresses)
                 {
                     kestrel.Listen(address, listening.Port);

@@ -180,11 +180,12 @@ public sealed record WebSocketTransportServerOptions
     public long? MaximumUnsentBytes { get; init; }
 
     /// <summary>
-    /// How long an upgrade's head may take to come whole: 30 seconds by default, Kestrel's
-    /// <c>RequestHeadersTimeout</c>, which holds it and answers 408, unmarked, on its heartbeat, past
-    /// it and within 2 seconds of it (spec 15.12). From 1 to 2³¹ − 1 milliseconds, rounded to the
-    /// nearest whole one; zero and infinite are refused. On the real clock, as the platform's parser
-    /// holds it.
+    /// How long an upgrade's head may take to come whole, and a socket may go before it: 30 seconds
+    /// by default (spec 15.12). A head is Kestrel's <c>RequestHeadersTimeout</c>, which holds it and
+    /// answers 408, unmarked, on its heartbeat, past it and within 2 seconds of it; a socket silent
+    /// from its open Kestrel's <c>KeepAliveTimeout</c>, which closes it without a word. An upgraded
+    /// socket is its heartbeat's alone. From 1 to 2³¹ − 1 milliseconds, rounded to the nearest whole
+    /// one; zero and infinite are refused. On the real clock, as the platform's parser holds it.
     /// </summary>
     public TimeSpan HeadersTimeout { get; init; } = ServerBounds.HeadersTimeout;
 
@@ -615,6 +616,10 @@ public sealed class WebSocketTransportServer : IServerTransport, IAsyncDisposabl
                 // answered 408 on Kestrel's heartbeat, which arms its deadline a heartbeat late, a
                 // connection's first head 1 to 2 seconds past its time (spec 15.12)
                 kestrel.Limits.RequestHeadersTimeout = _options.HeadersTimeout;
+
+                // * a socket reads its upgrade's head whole within it, from its open, or is closed
+                // without a word (spec 15.12); an upgraded one is the heartbeat's
+                kestrel.Limits.KeepAliveTimeout = _options.HeadersTimeout;
             });
             application = builder.Build();
             Built?.Invoke(application);

@@ -68,6 +68,15 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - The Rust side's HTTP and WebSocket server facades refuse a server given a clock over a transport
   given none in the words every side's server writes: "a server runs on the clock of its
   transport, the platform's, and was given another, one of its own".
+- **Breaking:** an idle HTTP socket or HTTP/2 session closes past `headersTimeout`, 30 s by
+  default, on every side, its gateway's own listener and a WebSocket server's address before its
+  upgrade among them; a PING keeps no HTTP/2 session, and one whose answer is under way is kept.
+  The C# side's idle socket closed at 130 s, and the TypeScript side's transport now sets its
+  server's `keepAliveTimeout`, which an application's `createServer` no longer sets. Under TLS, a
+  handshake not done within `headersTimeout` closes on every side. The C# HTTP client and
+  gateway let an idle pooled socket go after 4 s, as the other sides do, under every server's
+  bound at its default; a `headersTimeout` under 5 s races a pool that no `Keep-Alive` hint tells,
+  as Kestrel and hyper send none.
 
 ### Fixed
 

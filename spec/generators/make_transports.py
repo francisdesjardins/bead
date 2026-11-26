@@ -1018,6 +1018,13 @@ cases = [
      ['15.12', '15.12.14'], {'headersTimeout': HEAD_TIMEOUT}, [
          {'send': {'head': 'POST /bead HTTP/1.1\r\nhost: {host}\r\n'}, 'on': 'slow'},
          {**unmarked_as('slow', 408), 'after': HEAD_408_AFTER, 'within': HEAD_408_WITHIN}]),
+    # played on the real clock: a socket kept alive and idle closes past headersTimeout, within 2
+    # seconds of it, nothing written past its answer (HEAD_408_AFTER, HEAD_408_WITHIN)
+    ('an HTTP socket kept alive with no head and no answer under way closes past headersTimeout, nothing written',
+     ['15.12', '15.12.14'], {'headersTimeout': HEAD_TIMEOUT}, [
+         send('idle', 'POST', fields={'content-type': BEAD}, close=False),
+         expect('idle', 201, fields={'bead-connection-token': {'shape': 'token'}}),
+         {'expect': {'end': True}, 'on': 'idle', 'after': HEAD_408_AFTER, 'within': HEAD_408_WITHIN}]),
     ('a DELETE ends its connection, and an exchange after it is refused 404', ['15.4', '15.6.3', '15.6.6'], None, [
         *drawn(), send('delete', 'DELETE', fields={'bead-connection-token': '{token}'}), expect('delete', 204, body=''),
         post('after', ECHO), refused('after', 404, 'connection-unknown')]),
@@ -3530,7 +3537,8 @@ def amqp_broker():
 
 
 # the cases over HTTP played on the real clock, as what no clock given reaches is
-HTTP_REAL_TIME = {'a request whose head does not come whole within headersTimeout is answered 408, unmarked, and told by none'}
+HTTP_REAL_TIME = {'a request whose head does not come whole within headersTimeout is answered 408, unmarked, and told by none',
+                  'an HTTP socket kept alive with no head and no answer under way closes past headersTimeout, nothing written'}
 assert HTTP_REAL_TIME <= {name for name, *_ in cases}
 # the cases over HTTP a row of docs/support.md excuses a side from, by their names
 HTTP_DIFFERS = {HASH: HASHES, SCHEME_CASE: SCHEMES_CASE, METHOD_CASE: METHODS_CASE, LENGTHS_CASE: LENGTHS,

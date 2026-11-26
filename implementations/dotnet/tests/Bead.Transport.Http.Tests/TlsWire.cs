@@ -1,4 +1,5 @@
 using System.Buffers.Binary;
+using System.Diagnostics;
 using System.Globalization;
 using System.Net;
 using System.Net.Security;
@@ -31,6 +32,7 @@ internal sealed class TlsWire : IAsyncDisposable
     private const byte Headers = 0x1;
     private const byte ResetStream = 0x3;
     private const byte Settings = 0x4;
+    private const byte Ping = 0x6;
     private const byte GoAway = 0x7;
     private const byte EndStream = 0x1;
     private const byte EndHeaders = 0x4;
@@ -41,8 +43,14 @@ internal sealed class TlsWire : IAsyncDisposable
 
     private static readonly TimeSpan Patience = TimeSpan.FromSeconds(10);
 
+    // how often a session that only pings writes its PING
+    private static readonly TimeSpan PingEvery = TimeSpan.FromMilliseconds(100);
+
     private readonly TcpClient _tcp;
     private readonly SslStream _tls;
+
+    // since its handshake ended, where a server's idle time counts from
+    private readonly Stopwatch _secured = Stopwatch.StartNew();
     private int _nextStream = 1;
 
     private TlsWire(TcpClient tcp, SslStream tls)
@@ -53,28 +61,91 @@ internal sealed class TlsWire : IAsyncDisposable
 
     // helpers
 
-    /// <summary>Writes a raw prefix and observes EOF or an IO refusal within the bound.</summary>
-    public async Task<bool> EndsAfterRaw(byte[] prefix, TimeSpan within)
+    /// <summary>
+    /// The raw bytes given written, then what comes read and dropped: how long after its handshake
+    /// its server ended it, or reset it, or null when it did not within the bound, counted from there.
+    /// </summary>
+    public async Task<TimeSpan?> EndsAfterRaw(byte[] prefix, TimeSpan within)
     {
-        using var bound = CancellationTokenSource.CreateLinkedTokenSource(Cancelled);
-        bound.CancelAfter(within);
+        using var bound = BoundOf(within);
 
         try
         {
             await _tls.WriteAsync(prefix, bound.Token);
-            var buffer = new byte[4096];
-            while (await _tls.ReadAsync(buffer, bound.Token) != 0)
-            {
-            }
-            return true;
-        }
-        catch (OperationCanceledException) when (!Cancelled.IsCancellationRequested && bound.IsCancellationRequested)
-        {
-            return false;
         }
         catch (IOException)
         {
-            return true;
+            return _secured.Elapsed;
+        }
+
+        return await Ended(bound);
+    }
+
+    /// <summary>
+    /// The connection's preface and an empty SETTINGS, then a PING each 100 ms and nothing else: how
+    /// long after its handshake its server ended it, or reset it, or null when it did not within the
+    /// bound, counted from there.
+    /// </summary>
+    public async Task<TimeSpan?> EndsWhilePinging(TimeSpan within)
+    {
+        using var bound = BoundOf(within);
+        var ended = Ended(bound);
+
+        try
+        {
+            byte[] opening = [.. Preface, .. FrameOf((Settings, 0, 0), [])];
+
+            await _tls.WriteAsync(opening, bound.Token);
+
+            for (var count = 1L; !ended.IsCompleted; count += 1)
+            {
+                var data = new byte[8];
+
+                BinaryPrimitives.WriteInt64BigEndian(data, count);
+                await _tls.WriteAsync(FrameOf((Ping, 0, 0), data), bound.Token);
+                await Task.WhenAny(ended, Task.Delay(PingEvery, bound.Token));
+            }
+        }
+        catch (Exception reason) when (reason is IOException or OperationCanceledException && !Cancelled.IsCancellationRequested)
+        {
+            // its socket ended under a write, or its bound passed: its read says which
+        }
+
+        return await ended;
+    }
+
+    // a bound of `within` counted from its handshake's end
+    private CancellationTokenSource BoundOf(TimeSpan within)
+    {
+        var bound = CancellationTokenSource.CreateLinkedTokenSource(Cancelled);
+
+        bound.CancelAfter(within - _secured.Elapsed);
+
+        return bound;
+    }
+
+    // what comes read and dropped until its end or its reset: how long after its handshake it came,
+    // or null once its bound passed
+    private async Task<TimeSpan?> Ended(CancellationTokenSource bound)
+    {
+        var buffer = new byte[4096];
+
+        try
+        {
+            while (await _tls.ReadAsync(buffer, bound.Token) != 0)
+            {
+                // dropped
+            }
+
+            return _secured.Elapsed;
+        }
+        catch (OperationCanceledException) when (!Cancelled.IsCancellationRequested && bound.IsCancellationRequested)
+        {
+            return null;
+        }
+        catch (IOException)
+        {
+            return _secured.Elapsed;
         }
     }
 

@@ -12,6 +12,7 @@ using Microsoft.AspNetCore.Hosting.Server;
 using Microsoft.AspNetCore.Hosting.Server.Features;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Server.Kestrel.Core;
+using Microsoft.AspNetCore.Server.Kestrel.Https;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Net.Http.Headers;
@@ -193,11 +194,16 @@ public sealed record HttpTransportServerOptions
     private readonly TimeSpan _headersTimeout = ServerBounds.HeadersTimeout;
 
     /// <summary>
-    /// How long a request's head may take to come whole: 30 seconds by default, Kestrel's
-    /// <c>RequestHeadersTimeout</c>, which holds it and answers 408, unmarked, on its heartbeat, past
-    /// it and within 2 seconds of it (spec 15.12). From 1 to <see cref="Clocks.LongestTimer"/>
-    /// milliseconds, rounded to the nearest whole one; zero and infinite are refused. On the real
-    /// clock, as the platform's parser holds it.
+    /// How long a TLS handshake or a request's head may take to come whole, and a socket or an
+    /// HTTP/2 session may go with no head and no answer under way: 30 seconds by default (spec
+    /// 15.12). A head is Kestrel's <c>RequestHeadersTimeout</c>, which holds it and answers 408,
+    /// unmarked, on its heartbeat, past it and within 2 seconds of it; an idle socket Kestrel's
+    /// <c>KeepAliveTimeout</c>, which closes it without a word; a handshake Kestrel's
+    /// <c>HandshakeTimeout</c>; an HTTP/2 session a timer of the transport's own, counted from its
+    /// handshake's end and again in full from its last answer's end, a PING moving nothing, which
+    /// ends it by a GOAWAY. From 1 to <see cref="Clocks.LongestTimer"/> milliseconds, rounded to the
+    /// nearest whole one; zero and infinite are refused. On the real clock, as the platform's parser
+    /// holds it.
     /// </summary>
     public TimeSpan HeadersTimeout
     {
@@ -696,6 +702,9 @@ public sealed partial class HttpTransportServer : IServerTransport, IAsyncDispos
     /// </summary>
     internal Func<Microsoft.AspNetCore.Connections.ConnectionDelegate, Microsoft.AspNetCore.Connections.ConnectionDelegate>? Connecting { get; init; }
 
+    /// <summary>Each listener's TLS options, as they are built: the tests' way to read what it set on Kestrel's handshake.</summary>
+    internal event Action<HttpsConnectionAdapterOptions>? Securing;
+
     /// <summary>
     /// Each listen, its connection found by its token, before it is held: the tests' way to close
     /// its connection in between.
@@ -921,6 +930,11 @@ public sealed partial class HttpTransportServer : IServerTransport, IAsyncDispos
                 // answered 408 on Kestrel's heartbeat, which arms its deadline a heartbeat late, a
                 // connection's first head 1 to 2 seconds past its time (spec 15.12)
                 kestrel.Limits.RequestHeadersTimeout = _options.HeadersTimeout;
+
+                // * a socket with no answer under way reads a head whole within HeadersTimeout, or
+                // is closed without a word (spec 15.12): Kestrel times it from its open and from
+                // each answer's end to a head's first byte, RequestHeadersTimeout from there
+                kestrel.Limits.KeepAliveTimeout = _options.HeadersTimeout;
                 foreach (var address in listening.Addresses)
                 {
                     kestrel.Listen(address, listening.Port, (listen) =>
@@ -932,8 +946,13 @@ public sealed partial class HttpTransportServer : IServerTransport, IAsyncDispos
 
                         if (_options.Certificate is { } certificate)
                         {
+                            // a handshake not done within HeadersTimeout closed without a word
+                            var https = new HttpsConnectionAdapterOptions { ServerCertificate = certificate, HandshakeTimeout = _options.HeadersTimeout };
+
+                            Securing?.Invoke(https);
                             listen.Protocols = HttpProtocols.Http1AndHttp2;
-                            listen.UseHttps(certificate);
+                            listen.UseHttps(https);
+                            listen.Use(Idling);
                         }
                     });
                 }
@@ -1231,26 +1250,39 @@ public sealed partial class HttpTransportServer : IServerTransport, IAsyncDispos
     // an exchange, kept among those under way until it ends, so a stop lets it write its end
     private async Task Exchanging(HttpContext context)
     {
-        var exchange = Exchange(context);
+        // * a head read whole on an HTTP/2 session holds its idle timer until its answer ends, its
+        // linger included, whether it ends, throws or is cut
+        var session = _sessions.GetValueOrDefault(context.Connection.Id);
 
-        lock (_gate)
-        {
-            _exchanging.Add(exchange);
-        }
+        session?.Begin();
 
         try
         {
-            await exchange;
+            var exchange = Exchange(context);
+
+            lock (_gate)
+            {
+                _exchanging.Add(exchange);
+            }
+
+            try
+            {
+                await exchange;
+            }
+            finally
+            {
+                lock (_gate)
+                {
+                    _exchanging.Remove(exchange);
+                }
+            }
+
+            await Linger(context);
         }
         finally
         {
-            lock (_gate)
-            {
-                _exchanging.Remove(exchange);
-            }
+            session?.End();
         }
-
-        await Linger(context);
     }
 
     // ! an answer written before its body is whole closes its socket in stages (RFC 9112 §9.6):

@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Diagnostics;
 using System.Globalization;
 using System.IO.Compression;
 using System.Net;
@@ -2693,6 +2694,38 @@ public sealed class HttpGatewayTests
 
             // no route served
             Assert.Equal(0, Volatile.Read(ref drawn));
+        }
+        finally
+        {
+            await Stopped(started);
+        }
+    }
+
+    // spec 15.12: a socket of its own listener with no answer under way reads a head whole
+    // within its headers timeout, or is closed
+    [Fact]
+    public async Task Closes_a_kept_alive_socket_idle_past_headers_timeout_at_its_own_listener_without_another_response()
+    {
+        var started = await Started((options) =>
+        {
+            return options with { HeadersTimeout = TimeSpan.FromSeconds(1) };
+        });
+
+        try
+        {
+            using var socket = await Opened(started.Port, Encoding.ASCII.GetBytes(
+                $"GET /v1/books/2 HTTP/1.1\r\nhost: 127.0.0.1:{started.Port}\r\n\r\n"));
+            var reader = new Exchanges.Reader(socket);
+            var head = await reader.ReadHead().WaitAsync(Patience, Cancelled);
+
+            await reader.ReadBody(head).WaitAsync(Patience, Cancelled);
+            var idle = Stopwatch.StartNew();
+
+            Assert.Equal(200, head.Status);
+
+            // nothing more read: its end past its time from its answer, and within 5 seconds of it
+            Assert.Empty(await reader.UntilEnd().WaitAsync(Patience, Cancelled));
+            Assert.InRange(idle.Elapsed, TimeSpan.FromMilliseconds(900), TimeSpan.FromMilliseconds(5000));
         }
         finally
         {

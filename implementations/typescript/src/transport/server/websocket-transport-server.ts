@@ -48,6 +48,7 @@ import {
 import {
   assertCount,
   BODY_GRACE_PERIOD,
+  boundHeadOf,
   createSendPace,
   droppedOf,
   HEADERS_TIMEOUT,
@@ -1076,17 +1077,12 @@ export const createWebSocketTransportServer = (
               const { onRequest, shouldUpgradeCallback } = answersOf(() => {
                 return !isServing;
               });
-              // its head within `headersTimeout`, judged each second, its 408 Node's own; no time
-              // for the whole request, which an upgrade has no body to need
-              const http = createServer(
-                {
-                  connectionsCheckingInterval: 1_000,
-                  headersTimeout,
-                  requestTimeout: 0,
-                  shouldUpgradeCallback,
-                },
-                onRequest
-              );
+              const http = createServer({ shouldUpgradeCallback }, onRequest);
+
+              // its head within `headersTimeout`, judged each second, its 408 Node's own, and a
+              // socket idle before its upgrade no longer; no time for the whole request, which an
+              // upgrade has no body to need (spec 15.12)
+              boundHeadOf(http, headersTimeout);
               const listener: IListener = {
                 http,
                 // ! its own close timer, which `ws` arms on every close, its 1009 among them: the

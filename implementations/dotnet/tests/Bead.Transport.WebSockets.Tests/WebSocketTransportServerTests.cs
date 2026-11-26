@@ -4314,6 +4314,58 @@ public sealed partial class WebSocketTransportServerTests : IAsyncLifetime
         Assert.StartsWith("HTTP/1.1 101 ", Encoding.ASCII.GetString(buffer, 0, read), StringComparison.Ordinal);
     }
 
+    // spec 15.12: a socket at its address reads its upgrade's head whole within its headers
+    // timeout, from its open, or is closed
+    [Fact]
+    public async Task Closes_a_socket_silent_from_its_open_at_a_WebSocket_s_address_past_headers_timeout()
+    {
+        await Start(new WebSocketTransportServerOptions { HeadersTimeout = TimeSpan.FromSeconds(1) });
+
+        using var tcp = await OpenTcp();
+        var silent = Stopwatch.StartNew();
+        var buffer = new byte[1024];
+
+        // what comes dropped, a 408 or nothing: its end past its time from its open, and within 5
+        // seconds of it
+        try
+        {
+            while (await tcp.GetStream().ReadAsync(buffer, Cancelled).AsTask().WaitAsync(Patience, Cancelled) > 0)
+            {
+                // a 408 or not, as its platform writes it
+            }
+        }
+        catch (IOException)
+        {
+            // its reset
+        }
+
+        Assert.InRange(silent.Elapsed, TimeSpan.FromMilliseconds(900), TimeSpan.FromMilliseconds(5000));
+        Assert.Empty(_server.Clients);
+    }
+
+    // spec 15.12: an upgraded socket is its heartbeat's, never its headers timeout's
+    [Fact]
+    public async Task Keeps_an_upgraded_WebSocket_silent_past_headers_timeout()
+    {
+        var transport = new WebSocketTransportServer(new WebSocketTransportServerOptions { HeadersTimeout = TimeSpan.FromMilliseconds(200), Procedures = [InteropProcedures.Echo.Procedure.Address] });
+        await using var server = new Server<string>(transport);
+        await using var client = new WebSocketClient();
+        var interop = new InteropClient(client);
+
+        InteropHandlers.Offer(server);
+
+        var port = (await transport.Start(new TransportServerStartOptions { Address = "127.0.0.1", FindOpenPort = true, CancellationToken = Cancelled })).Port;
+
+        await client.Connect(new WebSocketTransportClientConnectOptions { Host = "127.0.0.1", Port = port, CancellationToken = Cancelled });
+
+        // * nothing written past its 101 for its headers timeout, the 2 seconds its close may take
+        // and a second more, past Kestrel's heartbeat: still open, and a message then echoed by
+        // its router
+        await Task.Delay(TimeSpan.FromMilliseconds(200 + 3000), Cancelled);
+        Assert.Single(transport.Clients);
+        Assert.Equal("\"x\"", (await Called(interop.Echo)).GetRawText());
+    }
+
     [Fact]
     public async Task Answers_408_a_head_that_did_not_come_within_its_headers_timeout_unmarked()
     {

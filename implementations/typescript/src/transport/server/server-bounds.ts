@@ -33,7 +33,49 @@ export interface ISendPaceOptions {
 export interface IHeadBoundServerLike {
   connectionsCheckingInterval?: number | undefined;
   headersTimeout?: number | undefined;
+  keepAliveTimeout?: number | undefined;
   requestTimeout?: number | undefined;
+}
+
+/** The part of an HTTP/2 stream an idle bound reads: Node's `Http2Stream`. */
+export interface IBoundStreamLike {
+  once(event: 'close', listener: () => void): unknown;
+}
+
+/** The part of an HTTP/2 session an idle bound holds: Node's `Http2Session`. */
+export interface ISessionLike {
+  close(): unknown;
+  destroy(): unknown;
+  on(event: 'stream', listener: (stream: IBoundStreamLike) => void): unknown;
+  once(event: 'close', listener: () => void): unknown;
+}
+
+/** The part of a socket a TLS server hands its `connection` and `secureConnection`. */
+export interface IPeerSocketLike {
+  readonly remoteAddress?: string | undefined;
+  readonly remotePort?: number | undefined;
+  destroy(): unknown;
+  once(event: 'close', listener: () => void): unknown;
+}
+
+/**
+ * The part of Node's TLS server whose handshakes an idle bound times: `node:https`'s, and
+ * `node:http2`'s secure one.
+ */
+export interface IHandshakeServerLike {
+  on(
+    event: 'connection' | 'secureConnection',
+    listener: (socket: IPeerSocketLike) => void
+  ): unknown;
+  setSecureContext(context: unknown): unknown;
+}
+
+/** What an idle bound is held to: its time, and the clock its timers run on. */
+export interface IIdleBoundOptions {
+  /** How long, in milliseconds, a TLS handshake may take, or a session go with no answer. */
+  headersTimeout: number;
+  /** Its stack's platform clock, whatever clock the server is given. */
+  platform: IClock;
 }
 
 /** The part of a socket Node hands its server's `clientError`: Node's `net.Socket`. */
@@ -154,10 +196,19 @@ export const lateOf = ({
   return `what waits for its socket was not taken by its deadline, at minimumSendBytesPerSecond ${String(minimumSendBytesPerSecond)} past sendGracePeriod ${String(sendGracePeriod)} ms`;
 };
 
+// a timer that keeps no process alive: a browser's has no `unref`
+const unrefOf = (timer: TimeoutId): TimeoutId => {
+  (timer as { unref?: () => unknown }).unref?.();
+
+  return timer;
+};
+
 /**
  * Sets the bounds Node's HTTP server holds a request's head to, before it listens: its head within
- * `headersTimeout`, judged each second, and no time for the whole request, a body's rate being the
- * transport's own. A server without them, `node:http2`'s, is left as it is.
+ * `headersTimeout`, judged each second; a kept-alive socket's idle span, its `keepAliveTimeout`,
+ * the same time (spec 15.12); and no time for the whole request, a body's rate being the
+ * transport's own. A server without them, `node:http2`'s in clear, is left as it is; its secure one
+ * with `allowHTTP1` has them, and is set alike.
  */
 export const boundHeadOf = (server: IHeadBoundServerLike, headersTimeout: number): void => {
   if (typeof server.headersTimeout !== 'number') {
@@ -165,8 +216,124 @@ export const boundHeadOf = (server: IHeadBoundServerLike, headersTimeout: number
   }
 
   server.headersTimeout = headersTimeout;
+  server.keepAliveTimeout = headersTimeout;
   server.requestTimeout = 0;
   server.connectionsCheckingInterval = CHECK_MILLISECONDS;
+};
+
+/**
+ * Holds an HTTP/2 session with no answer under way to `headersTimeout` (spec 15.12): its time runs
+ * from the call, stops at each stream it opens, and runs again in full once its last stream
+ * closes, a stream reset among them; a PING or a SETTINGS moves nothing. Past its time, the
+ * session closes, its GOAWAY Node's own, and is destroyed {@link LINGER_MILLISECONDS} later unless
+ * it closed by then. Its timers run on `platform` and keep no process alive.
+ */
+export const boundSessionOf = (
+  session: ISessionLike,
+  { headersTimeout, platform }: IIdleBoundOptions
+): void => {
+  // ! each stream's end is heard once, on every path: one left open keeps the session for ever
+  const open = new Set<IBoundStreamLike>();
+  let idle: TimeoutId | undefined;
+  let linger: TimeoutId | undefined;
+  let isClosed = false;
+
+  const arm = (): void => {
+    idle = unrefOf(
+      platform.setTimeout(() => {
+        idle = undefined;
+        session.close();
+        linger = unrefOf(
+          platform.setTimeout(() => {
+            linger = undefined;
+            session.destroy();
+          }, LINGER_MILLISECONDS)
+        );
+      }, headersTimeout)
+    );
+  };
+
+  session.on('stream', (stream) => {
+    open.add(stream);
+    platform.clearTimeout(idle);
+    idle = undefined;
+    stream.once('close', () => {
+      open.delete(stream);
+
+      if (open.size === 0 && !isClosed && linger === undefined) {
+        arm();
+      }
+    });
+  });
+  session.once('close', () => {
+    isClosed = true;
+    platform.clearTimeout(idle);
+    platform.clearTimeout(linger);
+    idle = undefined;
+    linger = undefined;
+  });
+  arm();
+};
+
+/**
+ * Holds each TLS handshake on `server` to `headersTimeout` (spec 15.12): a socket whose handshake
+ * has not ended by then is destroyed, nothing written. A socket is told from its `connection` to
+ * its `secureConnection` by its peer's address and port, which no two open sockets share. A server
+ * that is not under TLS, which has no `setSecureContext`, is left as it is. Its timers run on
+ * `platform` and keep no process alive.
+ */
+export const boundHandshakeOf = (
+  server: object,
+  { headersTimeout, platform }: IIdleBoundOptions
+): void => {
+  if (typeof (server as Partial<IHandshakeServerLike>).setSecureContext !== 'function') {
+    return;
+  }
+
+  const secure = server as IHandshakeServerLike;
+  const pending = new Map<string, TimeoutId>();
+
+  const keyOf = ({ remoteAddress, remotePort }: IPeerSocketLike): string | undefined => {
+    return remoteAddress === undefined || remotePort === undefined
+      ? undefined
+      : `${remoteAddress}|${String(remotePort)}`;
+  };
+
+  const settle = (key: string): void => {
+    platform.clearTimeout(pending.get(key));
+    pending.delete(key);
+  };
+
+  secure.on('connection', (socket) => {
+    const key = keyOf(socket);
+
+    // * a socket gone before it is read has no peer to wait for
+    if (key === undefined) {
+      return;
+    }
+
+    const timer = unrefOf(
+      platform.setTimeout(() => {
+        pending.delete(key);
+        socket.destroy();
+      }, headersTimeout)
+    );
+
+    pending.set(key, timer);
+    // its own timer alone: once it is gone, another socket may come from its address and port
+    socket.once('close', () => {
+      if (pending.get(key) === timer) {
+        settle(key);
+      }
+    });
+  });
+  secure.on('secureConnection', (socket) => {
+    const key = keyOf(socket);
+
+    if (key !== undefined) {
+      settle(key);
+    }
+  });
 };
 
 /**

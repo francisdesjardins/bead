@@ -1,5 +1,6 @@
 using System.Buffers.Binary;
 using System.Collections.Concurrent;
+using System.Diagnostics;
 using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Security;
@@ -83,7 +84,19 @@ public sealed partial class HttpTransportServerTests
     [Fact]
     public async Task Keeps_an_HTTP_2_session_past_headers_timeout_while_an_answer_is_under_way()
     {
-        await Start(new HttpTransportServerOptions { Certificate = Certificate.Value, HeadersTimeout = TimeSpan.FromMilliseconds(200) });
+        var closings = new ConcurrentQueue<CancellationToken>();
+
+        // * each session's close as its server asks it, a GOAWAY, which Kestrel's own keep-alive
+        // never asks
+        await Start(new HttpTransportServerOptions { Certificate = Certificate.Value, HeadersTimeout = IdleBound }, (next) =>
+        {
+            return (connection) =>
+            {
+                closings.Enqueue(connection.Features.Get<Microsoft.AspNetCore.Connections.Features.IConnectionLifetimeNotificationFeature>()!.ConnectionClosedRequested);
+
+                return next(connection);
+            };
+        });
         using var http = SecureClient();
         using var drew = await Fetch(http, Over(PostOf(SecureUrl, (null, null)), HttpVersion.Version20));
 
@@ -93,9 +106,12 @@ public sealed partial class HttpTransportServerTests
         var asking = Fetch(http, Over(PostOf(SecureUrl, (token, EnvelopeOf(EnvelopeKind.Request, 1))), HttpVersion.Version20));
         await Until(() => { return _messages.Count == 1; });
         Assert.Single(_messages);
-        // * the answer waits past the head's timeout many times over, and its linger
-        await Task.Delay(TimeSpan.FromSeconds(3), Cancelled);
+        // * the answer waits past the head's timeout three times over, and its linger
+        await Task.Delay(TimeSpan.FromMilliseconds(3500), Cancelled);
         Assert.False(asking.IsCompleted);
+
+        // its one session never asked to close
+        Assert.False(Assert.Single(closings).IsCancellationRequested);
         var answer = EnvelopeOf(EnvelopeKind.Result, 1);
         await _server.Send(new TransportMessage(answer, false), handle);
         using var asked = await asking;
@@ -103,10 +119,71 @@ public sealed partial class HttpTransportServerTests
         Assert.Equal(answer, await BytesOf(asked));
     }
 
-    [Fact(Skip = "divergence: work ahead, docs/support.md's row An idle connection's close: one idle bound over HTTP/1.1 and HTTP/2")]
+    [Fact]
+    public async Task Keeps_an_HTTP_2_session_for_headers_timeout_past_its_last_answer()
+    {
+        var sessions = 0;
+        var watch = Stopwatch.StartNew();
+        var ended = new TaskCompletionSource<TimeSpan>(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        // each session Kestrel takes counted, and when the last ended
+        await Start(new HttpTransportServerOptions { Certificate = Certificate.Value, HeadersTimeout = IdleBound }, (next) =>
+        {
+            return async (connection) =>
+            {
+                Interlocked.Increment(ref sessions);
+
+                try
+                {
+                    await next(connection);
+                }
+                finally
+                {
+                    ended.TrySetResult(watch.Elapsed);
+                }
+            };
+        });
+        using var http = SecureClient();
+        using var drew = await Fetch(http, Over(PostOf(SecureUrl, (null, null)), HttpVersion.Version20));
+
+        Assert.Equal(201, (int)drew.StatusCode);
+        var token = HeaderOf(drew, HttpTransport.ConnectionTokenHeader);
+        var handle = Assert.Single(_server.ConnectionHandles);
+
+        // a request answered 1500 ms after its head, past the session's time
+        var asking = Fetch(http, Over(PostOf(SecureUrl, (token, EnvelopeOf(EnvelopeKind.Request, 1))), HttpVersion.Version20));
+        await Until(() => { return _messages.Count == 1; });
+        await Task.Delay(TimeSpan.FromMilliseconds(1500), Cancelled);
+        await _server.Send(new TransportMessage(EnvelopeOf(EnvelopeKind.Result, 1), false), handle);
+        using (var asked = await asking)
+        {
+            Assert.Equal(200, (int)asked.StatusCode);
+            await BytesOf(asked);
+        }
+
+        // * 800 ms after that answer, another exchange on the same session, answered at once
+        await Task.Delay(TimeSpan.FromMilliseconds(800), Cancelled);
+        var again = Fetch(http, Over(PostOf(SecureUrl, (token, EnvelopeOf(EnvelopeKind.Request, 3))), HttpVersion.Version20));
+        await Until(() => { return _messages.Count == 2; });
+        await _server.Send(new TransportMessage(EnvelopeOf(EnvelopeKind.Result, 3), false), handle);
+        using (var asked = await again)
+        {
+            Assert.Equal((200, HttpVersion.Version20), ((int)asked.StatusCode, asked.Version));
+            await BytesOf(asked);
+        }
+        var last = watch.Elapsed;
+
+        // its end past its time from its last answer, and within 5 seconds of it
+        var end = await ended.Task.WaitAsync(Patience, Cancelled);
+
+        Assert.InRange(end - last, NoEndBefore, EndWithin);
+        Assert.Equal(1, Volatile.Read(ref sessions));
+    }
+
+    [Fact]
     public async Task Ends_an_HTTP_2_session_that_reads_no_request_s_head_within_headers_timeout_its_preface_its_settings_or_its_head_never_whole()
     {
-        await Start(new HttpTransportServerOptions { Certificate = Certificate.Value, HeadersTimeout = TimeSpan.FromMilliseconds(200) });
+        await Start(new HttpTransportServerOptions { Certificate = Certificate.Value, HeadersTimeout = IdleBound });
         byte[] settled = [.. Encoding.ASCII.GetBytes("PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n"), 0, 0, 0, 4, 0, 0, 0, 0, 0];
         byte[][] prefixes = [[], settled, [.. settled, 0, 0, 1, 1, 1, 0, 0, 0, 1, 0x82]];
         var wires = new List<TlsWire>();
@@ -116,16 +193,38 @@ public sealed partial class HttpTransportServerTests
             {
                 wires.Add(await TlsWire.Open(_port, (Certificate.Value, SslApplicationProtocol.Http2)));
             }
+
+            // silent, its preface and SETTINGS, a HEADERS never whole: each ended past its time from
+            // its handshake's end, and within 5 seconds of it
             var endings = await Task.WhenAll(wires.Select((wire, index) =>
             {
-                return wire.EndsAfterRaw(prefixes[index], TimeSpan.FromSeconds(5));
+                return wire.EndsAfterRaw(prefixes[index], Patience);
             }));
-            Assert.Equal([true, true, true], endings);
+
+            Assert.All(endings, (ending) =>
+            {
+                Assert.NotNull(ending);
+                Assert.InRange(ending.Value, NoEndBefore, EndWithin);
+            });
         }
         finally
         {
             foreach (var wire in wires) { await wire.DisposeAsync(); }
         }
+    }
+
+    [Fact]
+    public async Task Ends_an_HTTP_2_session_that_only_pings_within_headers_timeout()
+    {
+        await Start(new HttpTransportServerOptions { Certificate = Certificate.Value, HeadersTimeout = IdleBound });
+        await using var wire = await TlsWire.Open(_port, (Certificate.Value, SslApplicationProtocol.Http2));
+
+        // its preface and SETTINGS, then a PING each 100 ms, which moves nothing
+        var ending = await wire.EndsWhilePinging(Patience);
+
+        Assert.NotNull(ending);
+        Assert.InRange(ending.Value, NoEndBefore, EndWithin);
+        Assert.Empty(_connections);
     }
 
     [Fact]
