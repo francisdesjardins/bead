@@ -460,8 +460,10 @@ platform's, runs on tokio's timers and `SystemTime::now()`, one clock a stack, a
 **tokio's paused time is not the test clock**: it moves no wall clock, fires every timer due at once
 in its own order and settles nothing between them, where `spec/clocks.json` asks the armed order, a
 periodic timer armed again before its callback and a settle between timers. The stepping clock is
-the core's own, in its kit, `SteppingClock.cs`'s twin. What a platform's own socket times stays on
-the real clock, as on the other sides.
+the core's own, in its kit, `SteppingClock.cs`'s twin. What bounds a platform's own socket runs on
+the platform's clock, `SystemClock`, set where a stack starts, which a test steps through the
+stack's private `on_platform`, as the other sides step theirs
+([0011](0011-every-side-takes-its-time-from-a-clock-it-is-given.md)).
 
 **A duration is a `std::time::Duration`**, never milliseconds as a float
 ([0014](0014-every-place-that-takes-a-duration-is-a-row-of-one-file.md)); **never is
