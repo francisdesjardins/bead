@@ -68,6 +68,17 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - The Rust side's HTTP and WebSocket server facades refuse a server given a clock over a transport
   given none in the words every side's server writes: "a server runs on the clock of its
   transport, the platform's, and was given another, one of its own".
+- **Breaking:** a router's transport names the clock it runs on, on every side. On the
+  TypeScript side, `clock` is required on `IRouterServerTransportLike`,
+  `IRouterClientTransportLike` and `IJoinableTransportServer`, and a join's `clock` is always
+  one. On the Rust side, `ServerTransport::clock` and `RouterClientTransport::clock` return a
+  `SharedClock` and have no default. A router, a server or a client over a transport of the
+  application's own that names none no longer runs on the clock it is given, or on the
+  platform's. Give the transport that clock, or the platform's: `PLATFORM_CLOCK` on the
+  TypeScript side, and on the Rust side a `SystemClock` built with the transport by
+  `SystemClock::new`, which refuses outside a runtime. A transport that names none at run time,
+  from a JavaScript caller or past C#'s nullable annotations, is refused as the layer is built.
+  The C# side's `Clock` was already required.
 - **Breaking:** an idle HTTP socket or HTTP/2 session closes past `headersTimeout`, 30 s by
   default, on every side, its gateway's own listener and a WebSocket server's address before its
   upgrade among them; a PING keeps no HTTP/2 session, and one whose answer is under way is kept.
