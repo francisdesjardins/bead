@@ -4358,9 +4358,10 @@ public sealed partial class WebSocketTransportServerTests : IAsyncLifetime
 
         await client.Connect(new WebSocketTransportClientConnectOptions { Host = "127.0.0.1", Port = port, CancellationToken = Cancelled });
 
-        // * nothing written past its 101 for three times its headers timeout: still open, and a
-        // message then echoed by its router
-        await Task.Delay(TimeSpan.FromMilliseconds(600), Cancelled);
+        // * nothing written past its 101 for its headers timeout, the 2 seconds its close may take
+        // and a second more, past Kestrel's heartbeat: still open, and a message then echoed by
+        // its router
+        await Task.Delay(TimeSpan.FromMilliseconds(200 + 3000), Cancelled);
         Assert.Single(transport.Clients);
         Assert.Equal("\"x\"", (await Called(interop.Echo)).GetRawText());
     }

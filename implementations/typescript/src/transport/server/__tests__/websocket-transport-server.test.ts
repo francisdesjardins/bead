@@ -4578,7 +4578,9 @@ test.describe('WebSocketTransportServer, the head it reads', () => {
     server.on('message', ({ data }, heardOn) => {
       void server.send({ data }, heardOn);
     });
-    await sleep(3 * 200);
+    // * silent past its headers timeout, the 2 seconds its close may take and a second more,
+    // past Node's one-second check
+    await sleep(200 + 3000);
 
     expect(socket.readyState).toBe(WsClient.OPEN);
     const echoed = once(socket, 'message');

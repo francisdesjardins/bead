@@ -2370,8 +2370,8 @@ async fn keeps_an_upgraded_web_socket_silent_past_headers_timeout() {
     let mut client = client(port).await;
     let handle = recorder.connections(1).await.remove(0);
 
-    // * nothing written for three times its headers timeout
-    rest(Duration::from_millis(600)).await;
+    // * nothing written for its headers timeout, the 2 seconds its close may take and a second more
+    rest(Duration::from_millis(200 + 3000)).await;
     client.send(binary(&[1, 2, 3])).await.unwrap();
 
     let (heard, _) = recorder.messages(1).await.remove(0);
