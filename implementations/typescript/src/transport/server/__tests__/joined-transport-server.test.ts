@@ -6,6 +6,7 @@ import type { IProcedure, IProcedureAddress } from '../../../router/shared/types
 import { createServer } from '../../../server/server';
 import { createMemoryTransportClient } from '../../client/memory-transport-client';
 import { createWorkerTransportClient } from '../../client/worker-transport-client';
+import { PLATFORM_CLOCK } from '../../shared/clock';
 import { createEmitter } from '../../shared/emitter';
 import { ProgrammerError } from '../../shared/errors';
 import { gaugesOf } from '../../shared/gauges';
@@ -442,6 +443,19 @@ test.describe('joinTransports', () => {
         'a join takes transports that name the type of their handles, never a join'
       )
     );
+  });
+
+  // spec 15.14
+  test('joins two transports given no clock, on the platform’s', async () => {
+    using worker = createWorker();
+    await using joined = joinTransports([createMemoryTransportServer(), worker.server]);
+
+    expect(joined.clock).toBe(PLATFORM_CLOCK);
+
+    // * a server built over the join runs on it, refusing nothing
+    await using server = createServer({ transport: joined });
+
+    expect(server.router.clock).toBe(PLATFORM_CLOCK);
   });
 
   // spec 15.14
