@@ -379,6 +379,38 @@ public sealed partial class WebSocketTransportClientTests : IAsyncLifetime
         return new TransportClientReconnectDelay(delay);
     }
 
+    // ! a bind of port 0 draws a port free on its own family only, which another test's listener may
+    // hold on the other loopback. A localhost name's connect tries the IPv4 one first and reaches
+    // that listener. The server starts on the loopback given, on a port drawn free on both, and the
+    // other loopback keeps that port held, bound and not listening, until disposed
+    private static async Task<ClosedPort> StartedAloneOn(WebSocketTransportServer server, string address)
+    {
+        var other = address == "::1" ? IPAddress.Loopback : IPAddress.IPv6Loopback;
+
+        for (var attempt = 0; ; attempt += 1)
+        {
+            var held = new ClosedPort(other);
+
+            try
+            {
+                await server.Start(new TransportServerStartOptions { Address = address, Port = held.Port, CancellationToken = Cancelled });
+
+                return held;
+            }
+            catch (Exception reason) when (Loopbacks.IsInUse(reason) && attempt < 64)
+            {
+                // taken on the loopback given: another draw
+                held.Dispose();
+            }
+            catch
+            {
+                held.Dispose();
+
+                throw;
+            }
+        }
+    }
+
     // each close the client raises, in order
     private static Channel<(bool WasClean, bool WasQuick)> ClosesOf(WebSocketTransportClient client)
     {
@@ -4200,11 +4232,11 @@ public sealed partial class WebSocketTransportClientTests : IAsyncLifetime
         foreach (var address in Addresses.ReachedByLocalhost())
         {
             await using var server = new WebSocketTransportServer();
-            var port = (await server.Start(new TransportServerStartOptions { Address = address, FindOpenPort = true, CancellationToken = Cancelled })).Port;
+            using var held = await StartedAloneOn(server, address);
             await using var client = new WebSocketTransportClient();
             var started = TimeProvider.System.GetTimestamp();
 
-            await client.Connect(new WebSocketTransportClientConnectOptions { Host = "localhost", Port = port, CancellationToken = Cancelled }).WaitAsync(Patience, Cancelled);
+            await client.Connect(new WebSocketTransportClientConnectOptions { Host = "localhost", Port = held.Port, CancellationToken = Cancelled }).WaitAsync(Patience, Cancelled);
             connects.Add((address, TimeProvider.System.GetElapsedTime(started)));
             Assert.Equal((address, ReadyState.Open), (address, client.ReadyState));
         }

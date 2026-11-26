@@ -56,6 +56,24 @@ internal sealed class ClosedPort : IDisposable
         }
     }
 
+    /// <summary>
+    /// A port drawn free on both loopbacks and held on the one given alone: a listener of the other
+    /// family alone takes it there, and a connect to this one is refused.
+    /// </summary>
+    public ClosedPort(IPAddress loopback) : this()
+    {
+        ArgumentNullException.ThrowIfNull(loopback);
+
+        foreach (var socket in _held.ToList())
+        {
+            if (!((IPEndPoint)socket.LocalEndPoint!).Address.Equals(loopback))
+            {
+                socket.Dispose();
+                _held.Remove(socket);
+            }
+        }
+    }
+
     /// <summary>The port.</summary>
     public int Port { get; }
 
