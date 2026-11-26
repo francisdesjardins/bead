@@ -48,7 +48,7 @@ const TOOLCHAIN =
 const SLUG = args.slug || `release-docs-${VERSION}`;
 const SINCE = args.since || 'the newest `v*` tag (`git tag --list "v*" --sort=-v:refname`)';
 const OUT = `${SCRATCH}/${SLUG}`;
-const TMP = `TMP=${SCRATCH}/tmp TEMP=${SCRATCH}/tmp`;
+const TMP = `TMP=${SCRATCH}/tmp TEMP=${SCRATCH}/tmp CARGO_INCREMENTAL=0`;
 // * the session's model but where `model` names another, and then only at xhigh
 const modelOf = (effort) => {
   return args.model && effort === 'xhigh' ? { model: args.model } : {};
@@ -67,6 +67,7 @@ You work on Bead, at ${REPO}, on its release branch for ${VERSION}, checked out.
 - **Do not stage, commit, branch or push.** Temporary files go under ${OUT}/ alone; builds and tests run with \`${TMP}\`; \`${VENV}\` runs \`spec/check.py\` and the generators; the toolchain: ${TOOLCHAIN}.
 - Run \`node .claude/local/check.mjs <file>\` over every file you write, and never write a protected word.
 - Run a gate in the foreground, with a timeout that fits it (up to ten minutes); a run in the background only beside another you run at once, then one Monitor until-loop that waits on both, never sleeping and reading their output again and again.
+- Stop every process and watcher you started before you answer: a server, a broker's container, a browser, a Monitor; \`dotnet build-server shutdown\` after a C# build.
 - The released sections of \`CHANGELOG.md\` stay as they shipped (\`tools/check-versions.mjs\` holds them): an old number there is never changed.
 ${args.notes ? `${args.notes}\n` : ''}`;
 

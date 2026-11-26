@@ -60,8 +60,9 @@ const RECORD = args.record
 const COMMON = `
 You work on Bead, at ${REPO}${WHERE}. CLAUDE.md's rules are injected; these are the ones a stage most often misses:
 - **Do not stage, commit, branch or push.** Change nothing in the repository: write only under ${OUT}/.
-- Temporary files go under ${OUT}/ and nowhere else; run builds and tests with \`TMP=${SCRATCH}/tmp TEMP=${SCRATCH}/tmp\`. \`${VENV}\` runs \`spec/check.py\` and the generators; the toolchain: ${TOOLCHAIN}.
+- Temporary files go under ${OUT}/ and nowhere else; run builds and tests with \`TMP=${SCRATCH}/tmp TEMP=${SCRATCH}/tmp CARGO_INCREMENTAL=0\`. \`${VENV}\` runs \`spec/check.py\` and the generators; the toolchain: ${TOOLCHAIN}.
 - Run \`node .claude/local/check.mjs <file>\` from ${REPO} over every file you write, and never write a protected word.
+- Stop every process and watcher you started before you answer: a server, a broker's container, a browser, a Monitor; \`dotnet build-server shutdown\` after a C# build.
 - Run a gate in the foreground, with a timeout that fits it (up to ten minutes); a run in the background only beside another you run at once, then one Monitor until-loop that waits on both, never sleeping and reading their output again and again.
 - Before 1.0.0, a decision record or a released behaviour yields to a standard, an industry practice, a cleaner split, stability or clarity: name it and recommend the revision outright.
 The change:

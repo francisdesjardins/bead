@@ -61,6 +61,7 @@ The page is written for a hiring reader. It must hold in every point, today: wha
 - The truth is the repository, read at its HEAD: spec/spec.md and its companions, the conformance files, docs/support.md (what each side plays, what is ahead), docs/decisions/ and their index's "Where Bead goes", the READMEs, CHANGELOG.md, and the code of implementations/typescript, implementations/dotnet, implementations/rust and builder/. Cite file:line for each truth.
 - What is ahead is said plainly, with no date or condition. A claim the page leaves out is a finding only where its absence makes what it says false or misleading, as a table of what a side does that omits what it does.
 - Temporary files go under ${OUT}/ alone. Run \`node .claude/local/check.mjs <file>\` from ${REPO} over every file you write, and never write a protected word.
+- Stop every process and watcher you started before you answer: a server, a browser, a Monitor.
 ${ARGS.notes ? `${ARGS.notes}\n` : ''}`;
 
 const READ_ONLY =
