@@ -1161,8 +1161,11 @@ public sealed class MqttBrokerAdapter : IBrokerAdapter, IAsyncDisposable
                 return Task.CompletedTask;
             }
 
-            // * each PUBLISH counted as its receive loop reads it, in its connection's order, before
-            // MQTTnet queues it to hand on
+            // ! each PUBLISH counted as its receive loop reads it, in its connection's order, before
+            // MQTTnet queues it to hand on. MQTTnet queues each PUBLISH it decodes, whatever its
+            // topic or QoS, none dropped as a duplicate, and dispatches each to the one handler
+            // above while its link is up. It reads one it never dispatches only as its link ends, one
+            // it cannot decode among them, and that end settles what waits on the count
             if (inspected.Buffer is [var header, ..] && header >> 4 == MqttPackets.Publish)
             {
                 Interlocked.Increment(ref link.Received);
