@@ -215,6 +215,7 @@ export const RULES = Object.freeze([
         'release',
         'flow',
         'git-floor',
+        'caches',
         'bench-compare',
         'bench-release',
         'fuzz',

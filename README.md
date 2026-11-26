@@ -1144,6 +1144,11 @@ A clone needs Git 2.56 or newer for the repository's tools. CI's runners meet th
   first failure with its exit code and the command named; it exits 0 when every command passes.
   One table maps each path to the jobs that read it, a path no rule names reaching every job; CI's
   `scope` job applies it.
+- `node tools/caches.mjs [--repo <path>] [--min <size>]`: the ignored folders of the clone and
+  each worktree, largest first, with their regular file bytes and newest modification, and totals
+  per worktree and overall. `--min 500M` filters the rows, with K, M, G and T in powers of 1024;
+  totals include every ignored folder. Links are not followed; an unreadable path is named and
+  its total marked partial. It reads and prints only.
 - `node --test "tools/__tests__/*.test.mjs"`: the root's tools' own tests, in Node's runner, each in
   repositories it makes under the system's temporary folder. Those of `check-a11y.mjs` skip,
   saying why, where the TypeScript side or its Chromium is not installed; `BEAD_A11Y_REQUIRED=1`
