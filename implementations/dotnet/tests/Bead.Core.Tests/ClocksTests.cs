@@ -345,8 +345,7 @@ public sealed class ClocksTests
             [Durations.InputOf("NaN").Given, Durations.InputOf("\"1000\"").Given, Durations.InputOf("true").Given]);
     }
 
-    // a layer's clock: the one beneath it is never none here, where the TypeScript side's twin
-    // also plays a layer with nothing beneath it, which runs on the platform's
+    // a layer's clock: the one beneath it is never none here
     [Fact]
     public void A_layer_runs_on_the_clock_of_the_one_beneath_it_unless_given_one_and_refuses_one_that_differs_naming_both()
     {

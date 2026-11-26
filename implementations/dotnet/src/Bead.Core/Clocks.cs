@@ -122,11 +122,17 @@ public static class Clocks
     /// <summary>
     /// The clock of a layer built on another: the one beneath it, unless it was given one; one given
     /// that differs is an <see cref="ArgumentException"/> naming both. A layer is named in the
-    /// singular, which the refusal's verbs agree with.
+    /// singular, which the refusal's verbs agree with. A clock beneath that is none, which only a
+    /// caller past the nullable annotations gives, is an <see cref="ArgumentException"/> too.
     /// </summary>
     internal static TimeProvider Of((TimeProvider? Given, TimeProvider Beneath) clocks, (string Layer, string Below) names)
     {
         var (given, beneath) = clocks;
+
+        if (beneath is null)
+        {
+            throw new ArgumentException($"{names.Layer} runs on the clock of {names.Below}, which names none");
+        }
 
         if (given is null || ReferenceEquals(given, beneath))
         {

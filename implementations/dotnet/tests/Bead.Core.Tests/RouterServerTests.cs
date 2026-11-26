@@ -636,6 +636,29 @@ public sealed partial class RouterServerTests : IDisposable
     }
 
     [Fact]
+    public void Refuses_a_transport_that_names_no_clock_which_only_a_caller_past_its_types_can_give()
+    {
+        var refused = new[]
+        {
+            Assert.Throws<ArgumentException>(() =>
+            {
+                return new RouterServer(new ScriptedTransport { Clock = null! });
+            }),
+            Assert.Throws<ArgumentException>(() =>
+            {
+                return new RouterServer(
+                    new ScriptedTransport { Clock = null! },
+                    new RouterServerOptions { Clock = TimeProvider.System });
+            }),
+        };
+
+        Assert.All(refused, (refusal) =>
+        {
+            Assert.Equal("a server's router runs on the clock of its transport, which names none", refusal.Message);
+        });
+    }
+
+    [Fact]
     public async Task Go_to_the_resolver_registered_which_answers_on_their_call_id_announcing_the_session_once()
     {
         Start(new RouterServerOptions
