@@ -68,18 +68,20 @@ timer of the client's, never on a reading of its wall clock".
 
 **A stack has one clock, set where it starts and read upward.** The transports, the session manager
 and a router built alone take one — `clock` on the TypeScript side, `Clock` on the C# side, `clock`
-on the Rust side — and each layer exposes the clock it runs on. A layer built on another runs on
-that layer's clock, and refuses one that differs; a facade given a transport already built takes
-that transport's clock, and builds its sessions on it. On the TypeScript side their builder is
-given it, and a session manager it builds on another is disposed of, then refused; on the C# and
-Rust sides their options' clock must be it, and options on another are refused before any session
-manager is built. The code the builder generates adds none: it runs on its transport's clock.
+on the Rust side — and each layer exposes the clock it runs on, a transport given none its
+platform's. A layer built on another runs on that layer's clock, and refuses one that differs; a
+facade given a transport already built takes that transport's clock, and builds its sessions on it.
+On the TypeScript side their builder is given it, and a session manager it builds on another is
+disposed of, then refused; on the C# and Rust sides their options' clock must be it, and options on
+another are refused before any session manager is built. The code the builder generates adds none:
+it runs on its transport's clock.
 
 **A stack holds its platform's clock beside it, and a test may replace it.** The platform's clock is
-`PLATFORM_CLOCK`, the globals, on the TypeScript side; `TimeProvider.System` on the C# side; and
-`SystemClock` on the Rust side. A stack holds it as one value, set where it starts. Bead's own
-timers that bound a platform run on it, and a stack given no clock runs on it. A test replaces it
-through a seam outside the public surface:
+`PLATFORM_CLOCK`, the globals, on the TypeScript side; `TimeProvider.System` on the C# side; and on
+the Rust side a runtime's `SystemClock`: two on one runtime are one clock, which read one monotonic
+origin, the process's, and a layer takes either for the other. A stack holds it as one value, set
+where it starts. Bead's own timers that bound a platform run on it, and a stack given no clock runs
+on it. A test replaces it through a seam outside the public surface:
 
 - on the Rust side, the private `on_platform`;
 - on the TypeScript side, the option keyed by the symbol `PLATFORM`, which no entry of the package
@@ -95,10 +97,10 @@ turn, which no clock times.
 
 **The clock has each platform's shape.** On the C# side it is a `TimeProvider`. On the Rust side it
 is a `Clock` trait, its monotonic reading, its wall clock and a timer armed, `SystemClock` the
-platform's on tokio's timers, and a router built on a runtime without tokio's time driver refused as
-it is built, never failing at its first timer
-([0044](0044-rust-one-owner-per-router-traits-no-unsafe-two-parameters-no-warning.md)). On the
-TypeScript side it is the part of the globals Bead calls — `setTimeout`, `clearTimeout`,
+platform's on a runtime's timers, the core telling it from any other `Clock`, which is `Any`, and a
+router built on a runtime without tokio's time driver refused as it is built, never failing at its
+first timer ([0044](0044-rust-one-owner-per-router-traits-no-unsafe-two-parameters-no-warning.md)).
+On the TypeScript side it is the part of the globals Bead calls — `setTimeout`, `clearTimeout`,
 `setInterval`, `clearInterval`, `Date.now` and `performance.now` — which `globalThis` is by default,
 so its timers keep the platform's handle, `unref` included where it has one. The pair is a row of
 each side's list of terms ([0007](0007-csharp-interfaces-blocks-two-parameters-no-warning.md)). The
@@ -212,7 +214,7 @@ the round of the broker's core, which
 [0038](0038-over-a-broker-a-connection-is-placed-once-at-its-open-named-by-both-its-ends.md) keeps.
 
 The decision met the Tenth Man ([0009](0009-conventional-commits-git-flow-and-the-tenth-man.md)) in
-five rounds here, and in two more on durations, which
+six rounds here, and in two more on durations, which
 [0014](0014-every-place-that-takes-a-duration-is-a-row-of-one-file.md) holds. Its objections, each
 with the answer that holds:
 
@@ -283,3 +285,17 @@ with the answer that holds:
 | A replaced platform clock is named differently on each side, and "the real clock" becomes wrong once it can be replaced                                                                                  | Accepted in part. Accepted: the record says "the platform's clock". A stack given no clock runs on its platform's clock on every side, so a replaced one is named "one of its own" everywhere, as on the Rust side. Refused: renaming the `realTime` mark, or the titles that say "on the real clock". Each plays the platform's clock unreplaced, which is the real one.                                                                                                                                                |
 | The install turns many statements false, so the revision must bring every one along                                                                                                                      | Accepted: under the seam, the "never installed" sentences stay true. The revision changes 0011's Context, Decision, Consequences and the answer about both pings; 0004's paragraph on the heartbeats; 0044's sentence on the platform's socket; the TypeScript README; and the heartbeats' doc comments on every side. 0038, 0040, 0014 and 0033 still hold.                                                                                                                                                             |
 | The support row belongs in Differences, kind platform, not in Leveled down, and its cells depend on the mechanism                                                                                        | Accepted: a Differences row of kind platform, "A WebSocket's heartbeat and close timeout, stepped by a test", as "A session manager's timers" is. The TypeScript and Rust sides cite their stepped twins. The C# side cites its real-time twin and names .NET's keep-alive. The TypeScript client's close timeout is `ws`'s own timer, which no seam reaches.                                                                                                                                                            |
+
+### A transport's clock on the Rust side
+
+The Rust side's transports exposing their clock met the Tenth Man in one round. Its objections,
+each with the answer that holds:
+
+| Objection                                                                                                                                                                                                                                                 | Answer                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| The Rust platform's clock has no identity: each transport given none builds its own `SystemClock`, its own origin, and the join compares by pointer, so exposing it refuses a join of two transports given none, and `examples/hello/rust` stops starting | Accepted: two `SystemClock`s on one runtime are one clock, read from one monotonic origin, the process's, and `clock_of` and the join take either for the other. A per-runtime registry was refused: a reused runtime id could hand a new runtime a dead clock. Each side gains the twin `joins two transports given no clock, on the platform’s`; hello starts unchanged, probed. Decision 0011 states the Rust platform's clock as a runtime's.    |
+| No twin asserts the router's refusal: TypeScript's transport twin makes two checks, C#'s three, none a refusal, and no C# test refuses a layer given its own clock over a transport on the platform's                                                     | Accepted: the Rust twin makes C#'s three checks, the router's clock by identity; the refusal over a Bead transport given none goes into `runs_on_its_transports_clock_and_refuses_another`, over an in-memory transport, as TypeScript's twin does over a WebSocket one; C#'s `Runs_on_its_transport_s_clock_and_refuses_another` gains the same case. The row closes, so no cell cites it: the twins hold it.                                       |
+| A required `clock()` moves Rust from TypeScript's router contract to C#'s, drops the `on_own` case, and opens a difference no row holds                                                                                                                   | Accepted: the traits keep `Option<SharedClock>` and its default `None`, as TypeScript's `clock?`; Bead's eight transports return `Some`. The existing split, an application's transport that may name no clock on the TypeScript and Rust sides and must on the C# side, becomes an open row of the Differences; its closing is a decision of its own.                                                                                               |
+| A required `clock()` compared by pointer needs the same `Arc` on every call, which the proposal does not say, and an application's transport returning a fresh platform clock is refused in words that name the platform's twice                          | Accepted in part: the traits stay optional, so no application's transport must name one; equality removes the trap, a fresh `SystemClock` on the same runtime being the same clock (probe 3 accepted); one on another runtime is another clock, still refused in words that name the platform's twice. The doc comments say "the same on every call", which a test clock needs.                                                                      |
+| The inventory misses most of what the change touches: 29 implementors, the tests built on `Clockless`, the facades' own checks, hello, and the break users meet                                                                                           | Accepted: with the traits unchanged, the ten implementors on the default and the tests on `Clockless` stay as they are; the design lists the eight transports, the fields that go, and every test that changes or is added. The facades' checks go, the server refusing in the other sides' words; hello is held by CI's pairs. The CHANGELOG names the break: a server or a router given another clock over a Rust transport given none is refused. |
+| A router built on its own runtime over a transport given none moves its timers to the transport's runtime, silently                                                                                                                                       | Accepted: the doc comments of the routers', the server's and the client's `runtime` say the owner runs there and the timers on its clock's runtime. A refusal was refused: it would be Rust's alone, and the same holds today for a transport given a clock.                                                                                                                                                                                         |
