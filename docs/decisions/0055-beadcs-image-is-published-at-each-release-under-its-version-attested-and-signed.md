@@ -192,7 +192,7 @@ An image built from a clone runs the same way, by its local name in `BEADC_IMAGE
   has its failed job run again, `gh run rerun <run> --failed`, from the digests its builds kept for
   a week, since a new dispatch refuses the version the registry holds.
 - **BuildKit and buildx are pinned**, BuildKit by its version and its digest, buildx by its version,
-  and a release moves them with the base's digest.
+  and a release moves them with the base's digests.
 - **Each release pays two builds**, a platform's on a runner of its own, its test stage included.
 - **Its gates**: none is a pull request's. CI's image legs build and test the image on every push
   ([0006](0006-a-rule-has-its-gate.md)). `image.yml` refuses a run off a release's tag, a tag that

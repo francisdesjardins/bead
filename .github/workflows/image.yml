@@ -93,7 +93,7 @@ jobs:
           echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "revision=$GITHUB_SHA" >> "$GITHUB_OUTPUT"
       # ! buildx and BuildKit by their versions, BuildKit by its digest too: a release moves them
-      # with the base's digest (README, the release). The registry's words below are buildx's
+      # with the base's digests (README, the release). The registry's words below are buildx's
       - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
         with:
           version: v0.39.0

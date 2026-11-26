@@ -8,7 +8,7 @@
 # off each entry's options, the commit message's prefix among them, which tools/check-commits.mjs
 # holds every subject to.
 #
-# No `docker` entry: builder/Dockerfile names its base as `${NODE_IMAGE}@${NODE_DIGEST}`, which
+# No `docker` entry: builder/Dockerfile names its base as `${BASE}:<tag>@${BASE_DIGEST}`, which
 # Dependabot's reading of a FROM line does not resolve, nor the frontend's digest in its `syntax`
 # line; a release moves both by hand, with the images ci.yml runs by their digests.
 version: 2

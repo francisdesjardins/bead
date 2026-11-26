@@ -290,13 +290,20 @@ docker build -f builder/Dockerfile -t beadc:local .  # the image
 BEADC_IMAGE=beadc:local yarn test                    # from builder/: each wrapper runs it besides
 ```
 
-It holds Node from `node:26.13.1-trixie-slim`, pinned by its digest; beadc as this folder holds it,
-with its production packages, run by Node as written; buf, protoc-gen-es, protoc at its pin with its
-well-known types, `bead/options.proto`, the files of `spec/` beadc reads at their places beside it;
-and under `/opt/bead/licenses/` the licence texts of what it adds to its base, which
-[`tools/licenses.mjs`](tools/licenses.mjs) writes and holds to the image's
+Its base is Google's distroless `gcr.io/distroless/nodejs26-debian13:nonroot`, pinned by its
+digest: Node 26.13.1, which the test stage holds to the pin, on Debian 13's C and C++ runtimes,
+with no shell, no package manager, no npm and no Corepack. The image adds beadc as this folder holds
+it, with its production packages, run by Node as written; buf, protoc-gen-es, protoc at its pin with
+its well-known types, protoc-gen-buffa at its pin, `bead/options.proto`, the files of `spec/` beadc
+reads at their places beside it; and under `/opt/bead/licenses/` the licence texts of what it adds
+to its base, which [`tools/licenses.mjs`](tools/licenses.mjs) writes and holds to the image's
 `org.opencontainers.image.licenses` label: a package whose licence leaves the label fails the
-build. It has no SDK; its own user, 65532, is not root.
+build. buf, protoc and protoc-gen-buffa are static binaries; beadc runs buf's package by Node, and
+protoc-gen-es in its own process. It has no SDK; its own user, 65532, the base's `nonroot`, is not
+root. The stages that build run on the base's `debug` variant, the same Node beside BusyBox's
+shell, pinned by its digest too. The test stage lays BusyBox's shell and `env` over the image, for
+the tests' stand-ins, which are shell scripts, and the development packages' `#!/usr/bin/env node`
+executables, so the wrappers' runs over the image itself are what show that beadc needs neither.
 
 A project runs it through two wrappers, `beadc.sh` for bash 3.2 or later and `beadc.ps1` for
 PowerShell 7.6 or later, which `beadc wrapper` prints and `beadc init` writes, filled with beadc's
