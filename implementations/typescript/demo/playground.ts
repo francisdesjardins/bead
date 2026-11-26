@@ -37,19 +37,19 @@ const STATIC = 'data-bead-transport="worker"';
 const SCRIPT = 'src="./page.js"';
 
 /** How the page loads its theme before the first paint: a classic script, which this build names. */
-const THEME = '<script src="penumbra/theme.js"></script>';
+const THEME = '<script src="skin/theme.js"></script>';
 
 /** The page's faces, which the folder holds where a host of it at its root serves them. */
 const FONTS = new URL('../../../site/src/fonts/', DEMO);
 
-/** Penumbra's two sheets, the DevTools panel's copy, Bead's overrides of them, Bead's skin and
- * Bead's top bar, which the page links under its own styles. */
+/** The skin's two base sheets, which the DevTools panel links too, Bead's overrides of them, Bead's
+ * skin and Bead's top bar, which the page links under its own styles. */
 const SHEETS: readonly string[] = Object.freeze([
-  'penumbra/tokens.system.css',
-  'penumbra/tokens.skin.base.css',
-  'penumbra/tokens.system.overrides.css',
-  'penumbra/tokens.skin.css',
-  'penumbra/chrome.css',
+  'skin/tokens.system.css',
+  'skin/tokens.skin.base.css',
+  'skin/tokens.system.overrides.css',
+  'skin/tokens.skin.css',
+  'skin/chrome.css',
 ]);
 
 // helpers
@@ -95,7 +95,7 @@ const [pageFile, workerFile] = await Promise.all(
 // paint; named by its content, as the page's are
 const { metafile: themed } = await build({
   entryNames: '[name]-[hash]',
-  entryPoints: [pathOf('../devtools/penumbra/theme.js')],
+  entryPoints: [pathOf('../skin/theme.js')],
   format: 'iife',
   metafile: true,
   minify: true,
@@ -129,7 +129,7 @@ for (const expected of [SERVED, SCRIPT, THEME, ...SHEETS.map(linkOf)]) {
 // * the sheets written into the page: the folder a host publishes stays the page and its scripts
 const sheets = await Promise.all(
   SHEETS.map(async (sheet) => {
-    return { link: linkOf(sheet), text: await readFile(pathOf(`../devtools/${sheet}`), 'utf8') };
+    return { link: linkOf(sheet), text: await readFile(pathOf(`../${sheet}`), 'utf8') };
   })
 );
 const sheeted = sheets.reduce((written, { link, text }) => {

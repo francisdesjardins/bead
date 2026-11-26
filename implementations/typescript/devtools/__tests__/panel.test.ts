@@ -498,8 +498,8 @@ const skinnedSurfacesOf = async (): Promise<
   const site = new URL('../../../site/dist/', devtools);
   const page = await readFile(new URL('index.html', demo), 'utf8');
   const linked = await Promise.all(
-    [...page.matchAll(/<link rel="stylesheet" href="(penumbra\/[^"]+)"/gu)].map(([, href = '']) => {
-      return readFile(new URL(href, devtools), 'utf8');
+    [...page.matchAll(/<link rel="stylesheet" href="(skin\/[^"]+)"/gu)].map(([, href = '']) => {
+      return readFile(new URL(`../${href}`, devtools), 'utf8');
     })
   );
   const scripts = await Promise.all(
@@ -534,7 +534,7 @@ const skinnedSurfacesOf = async (): Promise<
 // definition
 
 test.describe('the panel', () => {
-  test('defines every custom property its styles and its views draw with, on penumbra’s sheets or its own skin', async () => {
+  test('defines every custom property its styles and its views draw with, on the skin’s two base sheets or its own skin', async () => {
     const devtools = new URL('../', import.meta.url);
     const read = (path: string): Promise<string> => {
       return readFile(new URL(path, devtools), 'utf8');
@@ -543,7 +543,7 @@ test.describe('the panel', () => {
       return name.endsWith('.ts');
     });
     const sheets = await Promise.all(
-      ['panel.html', 'penumbra/tokens.system.css', 'penumbra/tokens.skin.base.css'].map(read)
+      ['panel.html', '../skin/tokens.system.css', '../skin/tokens.skin.base.css'].map(read)
     );
     const scripts = await Promise.all(
       [

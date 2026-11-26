@@ -452,14 +452,14 @@ extension's icons, and records the sha256 of the mark and of each in `src/icons.
 three faces, Geist, Geist Mono and Newsreader, are in `src/fonts/`, with their licence, the SIL Open
 Font License.
 
-The page, the demo and the not-found page stand on one skin, Bead's `tokens.skin.css`, over
-penumbra's two sheets and Bead's overrides of them, and share one top bar, `chrome.css`, all five in
-`implementations/typescript/devtools/penumbra/`. The bar holds Bead's name and its navigation alone:
-the mark and the name, a link to the other surface, the language where there are two, the theme. It
-keeps 56 px at every width, on one line. The demo's own state, its transport, its connection, who
-it calls as and the wire, is a strip under it. The demo links the sheets; the build inlines them
-into the page, under `src/styles.css`, and into the not-found page, under the styles of
-`src/404.html`.
+The page, the demo and the not-found page stand on one skin, Bead's `tokens.skin.css`, over two
+base sheets, the scale and the neutrals, and Bead's overrides of them, and share one top bar,
+`chrome.css`, all five in `implementations/typescript/skin/`. The bar holds Bead's name and its
+navigation alone: the mark and the name, a link to the other surface, the language where there are
+two, the theme. It keeps 56 px at every width, on one line. The demo's own state, its transport,
+its connection, who it calls as and the wire, is a strip under it. The demo links the sheets; the
+build inlines them into the page, under `src/styles.css`, and into the not-found page, under the
+styles of `src/404.html`.
 
 The DevTools extension's privacy policy is a second page of both languages, at `/privacy/`: its
 content is `src/privacy.en.html` and `src/privacy.fr.html`, in the page's shell, its bar and its

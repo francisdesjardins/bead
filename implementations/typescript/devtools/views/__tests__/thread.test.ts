@@ -55,8 +55,8 @@ test.beforeAll(async () => {
       write: false,
     }),
     readFile(new URL('../../panel.html', import.meta.url), 'utf8'),
-    readFile(new URL('../../penumbra/tokens.system.css', import.meta.url), 'utf8'),
-    readFile(new URL('../../penumbra/tokens.skin.base.css', import.meta.url), 'utf8'),
+    readFile(new URL('../../../skin/tokens.system.css', import.meta.url), 'utf8'),
+    readFile(new URL('../../../skin/tokens.skin.base.css', import.meta.url), 'utf8'),
   ]);
 
   script = bundle.outputFiles[0]?.text ?? '';

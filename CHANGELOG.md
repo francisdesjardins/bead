@@ -26,6 +26,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `develop`, `main`, a release, a hotfix and a run by hand run every job, and `CI ok` holds each
   job to its scope. `node tools/ci-scope.mjs --local` prints the same jobs' commands before a push,
   and the root's format check moves to the `commits` job, which every change runs.
+- The page, the demo and the DevTools panel take their skin from one folder,
+  `implementations/typescript/skin/`: the two base sheets, Bead's skin over them, the top bar, the
+  theme's script and the mascot. The DevTools extension's package holds the panel's two sheets
+  under `skin/`.
 - The Node tools that download a pinned file try again on a network error, a 408, a 429 and a 5xx, and
   hold the bytes to their pin. One module, `tools/fetch-pinned.mjs`, makes each download.
 - CI's TypeScript job runs in parallel: its tests in two shards on each Node line, the DevTools

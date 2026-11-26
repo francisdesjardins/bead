@@ -9,19 +9,11 @@
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
     <style>
-/* Copied unchanged from penumbra at a618d89: change it there, then copy it again. */
-
-/**
- * Penumbra — the system half of the design system.
- *
- * Scale, rhythm, motion and stacking. **No colour and no typeface live here**, which is the whole
- * point: consumers import this file unchanged and write their own skin beside it. Anything that
- * would need changing here belongs in that skin. If a `#hex` or a font name appears below, the
- * split has failed and the file has stopped being portable — `yarn check` refuses it.
- *
- * A component asks for a step, never a pixel count. An off-scale literal must carry a comment
- * saying why it is off-scale — a measured geometry, a UA constant.
- */
+/* The system half of Bead's skin: scale, rhythm, motion and stacking. No colour and no typeface
+   live here. Each surface takes its colours from `tokens.skin.base.css` and a skin over it:
+   `tokens.skin.css` on the page, the demo and the not-found page, and the DevTools panel's own in
+   `panel.html`. A component asks for a step, never a pixel count. An off-scale literal carries a
+   comment that says why, a measured geometry or a UA constant. */
 
 :root {
   /* ── Space — the 4px grid ────────────────────────────────────────────────────────── */
@@ -107,32 +99,13 @@
   --app-scrollbar-width: 10px;
 }
 
-/* Copied unchanged from penumbra at a618d89: change it there, then copy it again. */
-
-/**
- * Penumbra — the neutral half of a skin: surfaces, neutrals, semantics and one shadow.
- *
- * **There is no brand in here.** Not a hue a project would recognise as its own, no typeface, and
- * nothing that says which product is being painted. What it carries is the part every project needs
- * and none of them decides differently: a paper, a ground, three ranks of text, a divider, a control
- * edge, the four semantic colours with their washes, a scrim, the scrollbar, and the single soft
- * lift that stands in for elevation.
- *
- * Import it after `tokens.system.css` and write the brand over it:
- *
- * ```css
- * @import 'penumbra/tokens.system.css';
- * @import 'penumbra/tokens.skin.base.css';
- * @import './tokens.skin.css';       // yours: a typeface, and eight colours
- * ```
- *
- * **The absence of a brand is a gate** — `yarn check` refuses a typeface here, refuses the eight
- * names a project paints itself with, and refuses any token the system half already declares. The
- * complementary rule guards the system file, which refuses colour.
- *
- * Neutrals carry a slate bias rather than being black at an opacity: a grey mixed toward the ground
- * reads as chosen, where an alpha ladder reads as whatever is behind it.
- */
+/* The neutral half of Bead's skin, after `tokens.system.css`: a paper, a ground, three ranks of
+   text, a divider, a control edge, the four semantic colours with their washes, a scrim, the
+   scrollbar, and the one soft lift that stands in for elevation. No brand and no typeface live
+   here. `tokens.skin.css` paints the page, the demo and the not-found page over it, and the
+   DevTools panel paints its own in `panel.html`. Neutrals carry a slate bias rather than black at
+   an opacity: a grey mixed toward the ground reads as chosen, where an alpha ladder reads as
+   whatever is behind it. */
 
 :root {
   /* ── Surfaces ─────────────────────────────────────────────────────────────── */
@@ -221,10 +194,9 @@
   --app-lift: 0 1px 1px rgb(2 6 23 / 0.5), 0 18px 44px -28px rgb(2 6 23 / 0.9);
 }
 
-/* Bead's own tokens beside penumbra's system half, which stays as penumbra writes it: what Bead adds
-   to its scale or declares anyway, a deliberate act penumbra's README asks to read as one. The demo
-   links it under the two sheets, and Bead's page and its not-found page inline it ahead of Bead's
-   skin. */
+/* What the page, the demo and the not-found page add to the system half's scale; the DevTools
+   panel keeps the scale alone. The demo links it under the two base sheets, and Bead's page and
+   its not-found page inline it ahead of Bead's skin. */
 
 :root {
   /* the least a control a finger reaches is, tall and wide, on a coarse pointer (WCAG 2.5.5) */
@@ -233,7 +205,7 @@
   --app-text-code: var(--app-text-sm);
 }
 
-/* Bead's skin over penumbra's two sheets and Bead's overrides of them: francisdesjardins.ca's brand,
+/* Bead's skin over the two base sheets and Bead's overrides of them: francisdesjardins.ca's brand,
    its faces and the violet neutrals it paints with, what Bead's surfaces draw code and refusals
    on, and the colours of code. The page, the demo and the not-found page take this one copy; the
    DevTools panel keeps its own, DevTools' look. The light scheme is the root's; the dark one
@@ -384,12 +356,12 @@
 /* Bead's top bar, one for the page, the demo and the not-found page, over Bead's skin: the mark and
    the name, a link to the page, a context word where there is one, and a row of tools at the right,
    each a finger's size. It holds Bead's name and its navigation alone, never a surface's state. It
-   is fixed and keeps penumbra's bar height at every width, on one line: what does not fit is a
+   is fixed and keeps the skin's bar height at every width, on one line: what does not fit is a
    surface's own to put elsewhere. The page and the not-found page inline it after the skin; the
    demo links it. */
 
 :root {
-  /* the frame the page and the demo share: penumbra's content width, the same gutter at its sides */
+  /* the frame the page and the demo share: the skin's content width, the same gutter at its sides */
   --frame-gutter: max(var(--app-space-4), 3vw);
 }
 

@@ -4,10 +4,10 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Bead</title>
-    <link rel="stylesheet" href="penumbra/tokens.system.css" />
-    <link rel="stylesheet" href="penumbra/tokens.skin.base.css" />
+    <link rel="stylesheet" href="skin/tokens.system.css" />
+    <link rel="stylesheet" href="skin/tokens.skin.base.css" />
     <style>
-      /* the panel's skin over penumbra's two sheets: its typefaces, its brand, and what it takes
+      /* the panel's skin over the two base sheets: its typefaces, its brand, and what it takes
          from DevTools' own look in place of the base's, each declared here on purpose */
       :root {
         --app-font-body: system-ui, -apple-system, 'Segoe UI', sans-serif;
@@ -20,7 +20,7 @@
         --app-radius-sm: 4px;
 
         /* DevTools' own type scale: 12 px for controls, rows and tabs, 11 px for what is secondary;
-           penumbra's steps keep their names at a panel's density */
+           the scale's steps keep their names at a panel's density */
         --app-text-sm: 0.6875rem;
         --app-text-md: 0.75rem;
         --app-text-base: 0.8125rem;
@@ -98,7 +98,7 @@
         margin: 0;
         background: var(--app-paper);
         color: var(--app-text);
-        /* ! on the body, never the root: penumbra's scale is in rem, which the root's size sets */
+        /* ! on the body, never the root: the skin's scale is in rem, which the root's size sets */
         font: var(--app-text-md) / var(--app-lh-body) var(--app-font-body);
       }
 

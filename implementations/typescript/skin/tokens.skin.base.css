@@ -1,29 +1,10 @@
-/* Copied unchanged from penumbra at a618d89: change it there, then copy it again. */
-
-/**
- * Penumbra — the neutral half of a skin: surfaces, neutrals, semantics and one shadow.
- *
- * **There is no brand in here.** Not a hue a project would recognise as its own, no typeface, and
- * nothing that says which product is being painted. What it carries is the part every project needs
- * and none of them decides differently: a paper, a ground, three ranks of text, a divider, a control
- * edge, the four semantic colours with their washes, a scrim, the scrollbar, and the single soft
- * lift that stands in for elevation.
- *
- * Import it after `tokens.system.css` and write the brand over it:
- *
- * ```css
- * @import 'penumbra/tokens.system.css';
- * @import 'penumbra/tokens.skin.base.css';
- * @import './tokens.skin.css';       // yours: a typeface, and eight colours
- * ```
- *
- * **The absence of a brand is a gate** — `yarn check` refuses a typeface here, refuses the eight
- * names a project paints itself with, and refuses any token the system half already declares. The
- * complementary rule guards the system file, which refuses colour.
- *
- * Neutrals carry a slate bias rather than being black at an opacity: a grey mixed toward the ground
- * reads as chosen, where an alpha ladder reads as whatever is behind it.
- */
+/* The neutral half of Bead's skin, after `tokens.system.css`: a paper, a ground, three ranks of
+   text, a divider, a control edge, the four semantic colours with their washes, a scrim, the
+   scrollbar, and the one soft lift that stands in for elevation. No brand and no typeface live
+   here. `tokens.skin.css` paints the page, the demo and the not-found page over it, and the
+   DevTools panel paints its own in `panel.html`. Neutrals carry a slate bias rather than black at
+   an opacity: a grey mixed toward the ground reads as chosen, where an alpha ladder reads as
+   whatever is behind it. */
 
 :root {
   /* ── Surfaces ─────────────────────────────────────────────────────────────── */

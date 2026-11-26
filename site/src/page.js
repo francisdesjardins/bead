@@ -1,5 +1,5 @@
 // At the end of the body: the language swapped in, its head, the table of contents, the menu, and a
-// folded block opened when a link lands in it. The theme's toggle is `penumbra/theme.js`'s.
+// folded block opened when a link lands in it. The theme's toggle is `skin/theme.js`'s.
 (() => {
   // each language's title, description and canonical address, which the build writes beside this
   // script

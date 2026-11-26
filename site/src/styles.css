@@ -1,5 +1,5 @@
-/* The page's own styles, over penumbra's two sheets, Bead's overrides of them, Bead's skin and its
-   top bar, which the build puts ahead of this sheet: its own tokens, the byte roles' and the
+/* The page's own styles, over the skin's two base sheets, Bead's overrides of them, Bead's skin and
+   its top bar, which the build puts ahead of this sheet: its own tokens, the byte roles' and the
    diagrams'. The light scheme is the root's; the dark one answers to `data-color-scheme`, or to
    the system where no script set it. */
 
@@ -114,7 +114,7 @@ a code {
 
 /* ── Top bar ──────────────────────────────────────────────────────────────── */
 
-/* the bar is `penumbra/chrome.css`'s. Here, where the contents are a sheet: the mark alone at its
+/* the bar is `skin/chrome.css`'s. Here, where the contents are a sheet: the mark alone at its
    left, its name left to the section read, which names the button that opens the contents; the
    language in the contents' foot. Where they are a column: the bar as the demo has it, the
    language by its two letters */
