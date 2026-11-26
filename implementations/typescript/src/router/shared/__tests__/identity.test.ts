@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test';
+import { PLATFORM_CLOCK } from '../../../transport/shared/clock';
 import { ProgrammerError } from '../../../transport/shared/errors';
 import { noop } from '../../../transport/shared/noop';
 import { createRouterClient } from '../../client/router-client';
@@ -156,6 +157,7 @@ test.describe('checkDeclaration', () => {
     const registry = createMetricsRegistry();
     using router = createRouterClient(
       {
+        clock: PLATFORM_CLOCK,
         off: () => {
           return undefined;
         },
@@ -196,6 +198,7 @@ test.describe('checkDeclaration', () => {
 
   test('checks a declaration before the router’s reasons and its registry’s', async () => {
     const transport = {
+      clock: PLATFORM_CLOCK,
       off: () => {
         return undefined;
       },

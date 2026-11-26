@@ -697,7 +697,7 @@ impl RouterClientTransport for InOrder {
         self.inner.resume();
     }
 
-    fn clock(&self) -> Option<SharedClock> {
+    fn clock(&self) -> SharedClock {
         self.inner.clock()
     }
 

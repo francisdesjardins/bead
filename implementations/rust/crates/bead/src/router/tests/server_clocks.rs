@@ -6,11 +6,11 @@ use crate::clock::{SharedClock, SystemClock, SystemClockOptions};
 use crate::memory::{MemoryTransportServer, MemoryTransportServerOptions};
 use crate::router::server::{RouterServer, RouterServerOptions};
 use crate::testing::SteppingClock;
-use crate::testing::clockless::Clockless;
 use crate::testing::scripted::ScriptedServer;
 use crate::transport::ServerTransport;
 
-async fn server_transport_clock() {
+#[tokio::test]
+async fn runs_on_its_transports_clock_and_refuses_another() {
     let clock: SharedClock = SteppingClock::new(super::january_first());
     let system: SharedClock =
         Arc::new(SystemClock::new(&SystemClockOptions::default()).expect("a system clock"));
@@ -26,12 +26,7 @@ async fn server_transport_clock() {
     };
     let same = RouterServer::new(Arc::<ScriptedServer>::clone(&transport), &given)
         .expect("the same clock");
-    let on_own = RouterServer::new(
-        Arc::new(Clockless(Arc::<ScriptedServer>::clone(&transport))),
-        &given,
-    )
-    .expect("the given clock");
-    for router in [&on_transport, &same, &on_own] {
+    for router in [&on_transport, &same] {
         assert!(Arc::ptr_eq(&router.clock(), &clock));
     }
     let before = transport.listener_count();
@@ -66,19 +61,8 @@ async fn server_transport_clock() {
             .to_string(),
         "a server's router runs on the clock of its transport, the platform's, and was given another, one of its own"
     );
-    for router in [on_transport, same, on_own] {
+    for router in [on_transport, same] {
         router.dispose().await;
     }
     assert_eq!(transport.listener_count(), 0);
-}
-
-#[tokio::test]
-async fn runs_on_its_transports_clock_or_on_the_one_it_is_given_when_its_transport_has_none_and_refuses_one_that_differs()
- {
-    server_transport_clock().await;
-}
-
-#[tokio::test]
-async fn runs_on_its_transports_clock_and_refuses_another() {
-    server_transport_clock().await;
 }

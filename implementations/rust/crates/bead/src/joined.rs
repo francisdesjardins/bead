@@ -35,7 +35,7 @@ struct JoinedInner {
     transports: Vec<Arc<dyn ServerTransport>>,
     // each transport by the type its handles begin with
     by_type: HashMap<String, usize>,
-    clock: Option<SharedClock>,
+    clock: SharedClock,
     // whether one of its transports names the procedures its connections take, asked once
     names_procedures: bool,
     listeners: Listeners<dyn ServerListener>,
@@ -230,12 +230,12 @@ impl JoinedServerTransport {
     /// A [`ProgrammerError`] for none, one that names no type — a join among them — two of one type,
     /// and two on different clocks, two platform clocks on one runtime being one.
     pub fn new(transports: Vec<Arc<dyn ServerTransport>>) -> Result<Self, ProgrammerError> {
-        if transports.is_empty() {
+        let Some(first) = transports.first() else {
             return Err(ProgrammerError::new("a join takes one transport at least"));
-        }
+        };
+        let clock = first.clock();
 
         let mut by_type: HashMap<String, usize> = HashMap::new();
-        let mut clock: Option<SharedClock> = None;
 
         for (index, transport) in transports.iter().enumerate() {
             let Some(kind) = transport.transport_type() else {
@@ -252,14 +252,8 @@ impl JoinedServerTransport {
                 )));
             }
 
-            if let Some(given) = transport.clock() {
-                match &clock {
-                    Some(held) if !crate::clock::is_same(held, &given) => {
-                        return Err(ProgrammerError::new("a join's transports run on one clock"));
-                    }
-                    Some(_) => {}
-                    None => clock = Some(given),
-                }
+            if !crate::clock::is_same(&clock, &transport.clock()) {
+                return Err(ProgrammerError::new("a join's transports run on one clock"));
             }
         }
 
@@ -340,9 +334,9 @@ impl ServerTransport for JoinedServerTransport {
         }
     }
 
-    // the one clock of its transports
-    fn clock(&self) -> Option<SharedClock> {
-        self.inner.clock.clone()
+    // the one clock of its transports, its first's
+    fn clock(&self) -> SharedClock {
+        Arc::clone(&self.inner.clock)
     }
 
     fn is_two_way(&self, connection_handle: &ConnectionHandle) -> bool {

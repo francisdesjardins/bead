@@ -249,8 +249,6 @@ test.describe('the clock', () => {
 
     expect(clockOf({ beneath, given: undefined }, names)).toBe(beneath);
     expect(clockOf({ beneath, given: beneath }, names)).toBe(beneath);
-    expect(clockOf({ beneath: undefined, given }, names)).toBe(given);
-    expect(clockOf({ beneath: undefined, given: undefined }, names)).toBe(PLATFORM_CLOCK);
     expect(() => {
       clockOf({ beneath, given }, names);
     }).toThrow(

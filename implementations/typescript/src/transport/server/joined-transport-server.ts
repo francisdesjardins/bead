@@ -73,19 +73,20 @@ const sumGauges = (
   });
 };
 
-/** The one clock the transports run on, none when none names one; two are a misuse. */
-const clockOf = (transports: readonly IJoinableTransportServer[]): IClock | undefined => {
-  const clocks = new Set(
-    transports.flatMap(({ clock }) => {
-      return clock === undefined ? [] : [clock];
+/** The one clock the transports run on, the first's; two are a misuse. */
+const clockOf = (
+  first: IJoinableTransportServer,
+  transports: readonly IJoinableTransportServer[]
+): IClock => {
+  if (
+    transports.some(({ clock }) => {
+      return clock !== first.clock;
     })
-  );
-
-  if (clocks.size > 1) {
+  ) {
     throw new ProgrammerError("a join's transports run on one clock");
   }
 
-  return clocks.values().next().value;
+  return first.clock;
 };
 
 // definition
@@ -115,7 +116,9 @@ const clockOf = (transports: readonly IJoinableTransportServer[]): IClock | unde
 export const joinTransports = <const Transports extends readonly IJoinableTransportServer[]>(
   transports: Transports
 ): IJoinedTransportServer<Transports> => {
-  if (transports.length === 0) {
+  const [first] = transports;
+
+  if (first === undefined) {
     throw new ProgrammerError('a join takes one transport at least');
   }
 
@@ -138,7 +141,7 @@ export const joinTransports = <const Transports extends readonly IJoinableTransp
     byType.set(transport.type, transport);
   }
 
-  const clock = clockOf(transports);
+  const clock = clockOf(first, transports);
   // its dispose, which every later one shares
   let disposed: Promise<void> | undefined;
   const emitter = createEmitter<TransportServerEventMap>();

@@ -2852,7 +2852,7 @@ crate::transport
     fn unlisten(&self, listener: &Arc<dyn ServerListener>)
     fn pause(&self, connection_handle: &ConnectionHandle)
     fn resume(&self, connection_handle: &ConnectionHandle)
-    fn clock(&self) -> Option<SharedClock>
+    fn clock(&self) -> SharedClock
     fn is_two_way(&self, _connection_handle: &ConnectionHandle) -> bool
     fn is_secure(&self, _connection_handle: &ConnectionHandle) -> bool
     fn carries_credential(&self, _connection_handle: &ConnectionHandle) -> bool
@@ -2873,7 +2873,7 @@ crate::transport
     fn pause(&self)
     fn disconnect(&self)
     fn resume(&self)
-    fn clock(&self) -> Option<SharedClock>
+    fn clock(&self) -> SharedClock
     fn is_secure(&self) -> bool
     fn carries(&self, _credential: &str) -> bool
     fn is_open(&self) -> bool

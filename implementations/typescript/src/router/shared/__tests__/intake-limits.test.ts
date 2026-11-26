@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test';
+import { PLATFORM_CLOCK } from '../../../transport/shared/clock';
 import { ProgrammerError } from '../../../transport/shared/errors';
 import { noop } from '../../../transport/shared/noop';
 import { createRouterClient } from '../../client/router-client';
@@ -8,6 +9,7 @@ import { intakeLimitsOf } from '../intake-limits';
 
 // a transport that hands nothing on, which a router is built over
 const transport = {
+  clock: PLATFORM_CLOCK,
   off: noop,
   on: noop,
   pause: noop,

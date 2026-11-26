@@ -51,7 +51,7 @@ impl RouterClientTransport for Unclosable {
         self.transport.resume();
     }
 
-    fn clock(&self) -> Option<SharedClock> {
+    fn clock(&self) -> SharedClock {
         self.transport.clock()
     }
 

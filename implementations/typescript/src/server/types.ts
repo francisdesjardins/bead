@@ -134,10 +134,7 @@ export interface IServerLayers<Transport extends IServerTransportLike, Data = un
 }
 
 export interface IServerOptions {
-  /**
-   * The clock the server runs on: its transport's, which one given must be; the platform's when
-   * neither has one.
-   */
+  /** The clock the server runs on: its transport's, which one given must be. */
   clock?: IClock | undefined;
   /**
    * What its router resolves a request presenting a `JWT` or an `ELSEWHERE` with: a `JWT`'s keys,

@@ -133,13 +133,13 @@ async fn counts_the_connections_it_holds_and_gives_their_handles_for_no_one_outs
 #[tokio::test]
 async fn runs_on_the_clock_its_transport_supplies_the_platform_s_when_it_supplies_none() {
     let ends = Ends::unstarted();
-    let supplied = ends.server.clock().expect("the clock it was given");
+    let supplied = ends.server.clock();
 
     assert!(Arc::ptr_eq(&supplied, &ends.shared), "its own clock");
 
     let unclocked = MemoryTransportServer::new(&MemoryTransportServerOptions::default())
         .expect("a server on no clock of its own");
-    let unclocked_clock = unclocked.clock().expect("its platform's clock");
+    let unclocked_clock = unclocked.clock();
 
     assert_eq!(unclocked_clock.description(), "the platform's");
 

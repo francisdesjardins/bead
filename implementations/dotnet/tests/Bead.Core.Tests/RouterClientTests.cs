@@ -485,6 +485,29 @@ public sealed partial class RouterClientTests
     }
 
     [Fact]
+    public void Refuses_a_transport_that_names_no_clock_which_only_a_caller_past_its_types_can_give()
+    {
+        var refused = new[]
+        {
+            Assert.Throws<ArgumentException>(() =>
+            {
+                return new RouterClient(new ScriptedTransport { Clock = null! });
+            }),
+            Assert.Throws<ArgumentException>(() =>
+            {
+                return new RouterClient(
+                    new ScriptedTransport { Clock = null! },
+                    new RouterClientOptions { Clock = TimeProvider.System });
+            }),
+        };
+
+        Assert.All(refused, (refusal) =>
+        {
+            Assert.Equal("a client's router runs on the clock of its transport, which names none", refusal.Message);
+        });
+    }
+
+    [Fact]
     public void Takes_any_transport_of_this_package()
     {
         var transport = new ScriptedTransport();

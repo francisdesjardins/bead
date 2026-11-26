@@ -1096,8 +1096,8 @@ impl ServerTransport for WebSocketTransportServer {
         }
     }
 
-    fn clock(&self) -> Option<SharedClock> {
-        Some(Arc::clone(&self.inner.clock))
+    fn clock(&self) -> SharedClock {
+        Arc::clone(&self.inner.clock)
     }
 
     // as its application says of what stands in front of it, else by what it listens on

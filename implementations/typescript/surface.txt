@@ -1429,7 +1429,7 @@ src/client/types.ts IClientTransportLike
     reconnect(options?: {signal?: AbortSignal | undefined}): Promise<void>
     [Symbol.asyncDispose](): Promise<void>
     carries?(credential: string): boolean
-    readonly clock?: IClock | undefined
+    readonly clock: IClock
     readonly isSecure?: boolean | undefined
     off(event: 'close', listener: (wasClean: boolean, wasQuick: boolean) => void): unknown
     off(event: 'message', listener: (message: ITransportMessage) => void): unknown
@@ -1563,7 +1563,7 @@ src/router/client/types.ts IRouterClientOptions
 src/router/client/types.ts IRouterClientTransportLike
   interface IRouterClientTransportLike
     carries?(credential: string): boolean
-    readonly clock?: IClock | undefined
+    readonly clock: IClock
     disconnect?(): Promise<unknown>
     readonly isSecure?: boolean | undefined
     off(event: 'close', listener: (wasClean: boolean, wasQuick: boolean) => void): unknown
@@ -1727,7 +1727,7 @@ src/router/server/types.ts IRouterServerOptions
     sessionTokenOf?: | ((connectionHandle: TransportServerConnectionHandle) => SessionToken | undefined) | undefined
 src/router/server/types.ts IRouterServerTransportLike
   interface IRouterServerTransportLike
-    readonly clock?: IClock | undefined
+    readonly clock: IClock
     off(event: 'close', listener: EmitterListener<[wasClean: boolean, connectionHandle: TransportServerConnectionHandle]>): unknown
     off(event: 'connection', listener: EmitterListener<[connection: ITransportServerConnection, connectionHandle: TransportServerConnectionHandle]>): unknown
     off(event: 'message', listener: EmitterListener<[message: ITransportMessage, connectionHandle: TransportServerConnectionHandle]>): unknown
@@ -2590,7 +2590,7 @@ src/server/types.ts IServerTransportLike
     on(event: 'message', listener: EmitterListener<[message: ITransportMessage, connectionHandle: TransportServerConnectionHandle]>): unknown
     on(event: 'refusal', listener: EmitterListener<[refusal: ITransportServerRefusal]>): unknown
     stop(): Promise<void>
-    readonly clock?: IClock | undefined
+    readonly clock: IClock
     carriesCredential?(connectionHandle: TransportServerConnectionHandle): boolean
     isSecure?(connectionHandle: TransportServerConnectionHandle): boolean
     isTwoWay?(connectionHandle: TransportServerConnectionHandle): boolean
@@ -3553,7 +3553,7 @@ src/transport/server/types.ts IIncomingMessageLike
     readonly url?: string | undefined
 src/transport/server/types.ts IJoinableTransportServer
   interface IJoinableTransportServer
-    readonly clock?: IClock | undefined
+    readonly clock: IClock
     readonly type: string
     carriesCredential?(connectionHandle: TransportServerConnectionHandle): boolean
     close(connectionHandle: TransportServerConnectionHandle): Promise<boolean>
@@ -3569,7 +3569,7 @@ src/transport/server/types.ts IJoinableTransportServer
     takesProcedure?(connectionHandle: TransportServerConnectionHandle, address: IProcedureAddress): boolean
 src/transport/server/types.ts IJoinedTransportServer
   interface IJoinedTransportServer<Transports extends readonly IJoinableTransportServer[] = readonly IJoinableTransportServer[]> extends IEventMethods<TransportServerEventMap, IJoinedTransportServer<Transports>>
-    readonly clock: IClock | undefined
+    readonly clock: IClock
     readonly transports: Transports
     carriesCredential(connectionHandle: TransportServerConnectionHandle): boolean
     close(connectionHandle: TransportServerConnectionHandle): Promise<boolean>

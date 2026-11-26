@@ -113,10 +113,7 @@ export interface IRouterClient<
 
 /** What a client's router is built with. */
 export interface IRouterClientOptions {
-  /**
-   * The clock it runs on: its transport's, which one given must be; the platform's when neither
-   * has one.
-   */
+  /** The clock it runs on: its transport's, which one given must be. */
   clock?: IClock | undefined;
   /**
    * The credential every call presents by default, as {@link IRouterClient.credential} says; none
@@ -158,8 +155,8 @@ export interface IRouterClientTransportLike {
    * fails before it goes, DESTINATION_UNREACHABLE (spec 13.4).
    */
   carries?(credential: string): boolean;
-  /** The clock it runs on, which the router runs on too; none, and the router takes its own. */
-  readonly clock?: IClock | undefined;
+  /** The clock it runs on, which the router runs on too. */
+  readonly clock: IClock;
   /**
    * Disconnects it — its server has the router refuse its commands past what their resolvers
    * outlive (spec 9.2, step 3). One without it stays connected.

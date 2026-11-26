@@ -6,6 +6,7 @@ import type { IMetricsRegistry } from '../metrics-registry';
 import type { IRouterClientTransportLike } from '../../client/types';
 import type { IRouterServerTransportLike } from '../../server/types';
 import { createEmitter } from '../../../transport/shared/emitter';
+import { type IClock, PLATFORM_CLOCK } from '../../../transport/shared/clock';
 import type { TransportServerConnectionHandle } from '../../../transport/server/types';
 import type { ITransportMessage } from '../../../transport/shared/types';
 import { createRouterCore } from '../router-core';
@@ -242,12 +243,15 @@ export const createLoopback = ({
  * what the client sends the server takes from it, and the other way. A message is handed over within
  * its send, or a turn later when `isDeferred`; a send while the connection is not open rejects.
  * `open` and `close` play its life; `sent` holds each side's bytes, in order, and `pauses` each
- * pause, `true`, and resume its router asked of it, which holds nothing.
+ * pause, `true`, and resume its router asked of it, which holds nothing. Both run on the clock it is
+ * given, the platform's by default.
  */
 export const createPipedTransports = ({
+  clock = PLATFORM_CLOCK,
   connectionHandle,
   isDeferred = false,
 }: {
+  clock?: IClock | undefined;
   connectionHandle: TransportServerConnectionHandle;
   isDeferred?: boolean | undefined;
 }) => {
@@ -291,6 +295,7 @@ export const createPipedTransports = ({
     carries: () => {
       return true;
     },
+    clock,
     isSecure: true,
     // oxlint-disable-next-line typescript/unbound-method -- `createEmitter` returns arrow functions, which have no `this` to lose
     off: client.off,
@@ -321,6 +326,7 @@ export const createPipedTransports = ({
     carriesCredential: () => {
       return true;
     },
+    clock,
     isSecure: () => {
       return true;
     },

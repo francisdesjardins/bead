@@ -20,7 +20,7 @@ import type {
   IServiceManagerOptions,
 } from '../../router/shared/types';
 import { callIdsOf, envelopeOf } from '../../router/shared/__tests__/fixtures';
-import { LONGEST_TIMER } from '../../transport/shared/clock';
+import { type IClock, LONGEST_TIMER, PLATFORM_CLOCK } from '../../transport/shared/clock';
 import { createTestClock, delaysOn, duesOn } from '../../transport/shared/__tests__/fixtures';
 import type {
   ITransportServerConnection,
@@ -75,8 +75,13 @@ const echo: IProcedure = {
   serviceRevision: 1,
 };
 
-/** A transport server that records what it sends and closes, and hands on what a test delivers. */
-const createScriptedTransport = () => {
+/**
+ * A transport server that records what it sends and closes, and hands on what a test delivers, on
+ * the clock it is given: the platform's by default.
+ */
+const createScriptedTransport = ({
+  clock = PLATFORM_CLOCK,
+}: { clock?: IClock | undefined } = {}) => {
   const emitter = createEmitter<{
     close: [wasClean: boolean, connectionHandle: Handle];
     connection: [connection: ITransportServerConnection, connectionHandle: Handle];
@@ -97,6 +102,7 @@ const createScriptedTransport = () => {
   };
 
   const transport: IServerTransportLike = {
+    clock,
     off: emitter.off,
     on: emitter.on,
     close: async (connectionHandle) => {
@@ -178,7 +184,7 @@ const createSessionServer = (
   timeouts: { connectionInactivityTimeout: number; sessionInactivityTimeout: number },
   options?: IServerOptions
 ) => {
-  const scripted = createScriptedTransport();
+  const scripted = createScriptedTransport({ clock: options?.clock });
   const server = createServer({ transport: scripted.transport }, options);
 
   server.services.getRequestResolver(openSession, { serializer: text })((request, response) => {
@@ -763,8 +769,8 @@ test.describe('createServer', () => {
 
   test('a connection that never opens a session is closed once silent, when the server says how long', async () => {
     const clock = createTestClock();
-    const quiet = createScriptedTransport();
-    const told = createScriptedTransport();
+    const quiet = createScriptedTransport({ clock });
+    const told = createScriptedTransport({ clock });
 
     await using server = createServer(
       { transport: told.transport },
@@ -796,7 +802,7 @@ test.describe('createServer', () => {
 
   test('answers slow once its server’s clock passed its wait, never before', async () => {
     const clock = createTestClock();
-    const scripted = createScriptedTransport();
+    const scripted = createScriptedTransport({ clock });
     const { procedure } = InteropProcedures.slow;
 
     await using server = createServer<IServerTransportLike, string>(
@@ -840,7 +846,7 @@ test.describe('createServer', () => {
   test('closes a connection silent for a millisecond or the longest timer at its due', async () => {
     for (const timeout of [1, LONGEST_TIMER]) {
       const clock = createTestClock();
-      const scripted = createScriptedTransport();
+      const scripted = createScriptedTransport({ clock });
 
       await using server = createServer(
         { transport: scripted.transport },
@@ -861,7 +867,7 @@ test.describe('createServer', () => {
   test('ignores listens outside a connection and unmatched endings without changing its inactivity deadline', async () => {
     const clock = createTestClock();
     const second: Handle = 'type=WS;ip=127.0.0.1;port=50002;ordinal=2';
-    const { closed, emitter, listen, open, transport } = createScriptedTransport();
+    const { closed, emitter, listen, open, transport } = createScriptedTransport({ clock });
 
     await using server = createServer({ transport }, { clock, connectionInactivityTimeout: 60 });
 
@@ -914,7 +920,7 @@ test.describe('createServer', () => {
 
   test('a listen held is no silence: a connection with no session is not closed while one is, and is closed the server’s own timeout after the last ends', async () => {
     const clock = createTestClock();
-    const { ask, closed, listen, open, transport } = createScriptedTransport();
+    const { ask, closed, listen, open, transport } = createScriptedTransport({ clock });
 
     await using server = createServer({ transport }, { clock, connectionInactivityTimeout: 60 });
 
@@ -1354,13 +1360,13 @@ test.describe('createServer', () => {
 
   test('builds its sessions with their own options on its transport’s clock', async () => {
     const clock = createTestClock();
-    const { open, transport } = createScriptedTransport();
+    const { open, transport } = createScriptedTransport({ clock });
 
     await using server = createServer({
       sessions: (options) => {
         return createSessionManager({ ...options, sessionInactivityTimeout: 3_000 });
       },
-      transport: { ...transport, clock },
+      transport,
     });
 
     open(first);
@@ -1381,8 +1387,7 @@ test.describe('createServer', () => {
 
   test("runs every layer on its transport's clock: the sessions are built with it, and a layer on another is refused, leaving nothing on its transport", async () => {
     const clock = createTestClock();
-    const { emitter, transport } = createScriptedTransport();
-    const clocked = { ...transport, clock };
+    const { emitter, transport: clocked } = createScriptedTransport({ clock });
     const given: unknown[] = [];
 
     await using server = createServer({
@@ -1416,15 +1421,18 @@ test.describe('createServer', () => {
       ],
       [
         () => {
-          return createServer(
-            {
-              router: (below, options) => {
-                return createRouterServer(below, { ...options, clock: undefined });
-              },
-              transport: { ...transport },
+          return createServer({
+            router: (below, options) => {
+              return createRouterServer(
+                { ...below, clock: PLATFORM_CLOCK },
+                {
+                  ...options,
+                  clock: undefined,
+                }
+              );
             },
-            { clock }
-          );
+            transport: clocked,
+          });
         },
         "a server's router runs on the clock of its server, one of its own, and was given another, the platform's",
       ],

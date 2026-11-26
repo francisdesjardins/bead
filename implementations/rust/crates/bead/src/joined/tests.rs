@@ -39,7 +39,7 @@ use crate::payloads::TextCodec;
 use crate::router::types::{BoxFuture, ConnectionHandle, Gauges, RouterError, TransportMessage};
 use crate::server::{HealthStatus, Server, ServerOptions};
 use crate::testing::pair::echo;
-use crate::testing::{SteppingClock, hexadecimal};
+use crate::testing::{SteppingClock, hexadecimal, platform_clock};
 use crate::transport::{
     ClientListener, Listeners, ReadyState, RouterClientTransport, Sent, ServerListener,
     ServerTransport, TransportClientDisconnectOptions, TransportServerRefusal,
@@ -61,7 +61,7 @@ fn january_first() -> SystemTime {
 struct Paired {
     kind: &'static str,
     handle: ConnectionHandle,
-    clock: Option<SharedClock>,
+    clock: SharedClock,
     is_secured: bool,
     is_carrying: bool,
     is_both_ways: bool,
@@ -86,7 +86,7 @@ impl Default for Paired {
         Self {
             kind: "WS",
             handle: Arc::from(SOCKET),
-            clock: None,
+            clock: Arc::new(platform_clock().expect("a platform clock")),
             is_secured: true,
             is_carrying: false,
             is_both_ways: true,
@@ -179,8 +179,8 @@ impl ServerTransport for Paired {
         locked(&self.calls).push(format!("resume {connection_handle}"));
     }
 
-    fn clock(&self) -> Option<SharedClock> {
-        self.clock.clone()
+    fn clock(&self) -> SharedClock {
+        Arc::clone(&self.clock)
     }
 
     fn is_two_way(&self, _connection_handle: &ConnectionHandle) -> bool {
@@ -239,8 +239,9 @@ impl ClientListener for Hearing {
 }
 
 // a transport that says nothing of a flag: none carried, none secure, two-way
-#[derive(Debug, Default)]
+#[derive(Debug)]
 struct Silent {
+    clock: SharedClock,
     calls: Mutex<Vec<String>>,
 }
 
@@ -271,6 +272,10 @@ impl ServerTransport for Silent {
 
     fn resume(&self, _connection_handle: &ConnectionHandle) {
         locked(&self.calls).push("resume".to_owned());
+    }
+
+    fn clock(&self) -> SharedClock {
+        Arc::clone(&self.clock)
     }
 
     fn stop(&self) -> BoxFuture<Result<(), RouterError>> {
@@ -421,7 +426,10 @@ async fn hands_on_each_transport_s_events_with_the_handle_it_drew() {
     let shared: SharedClock = Arc::<SteppingClock>::clone(&clock);
     let memory = memory_on(&shared).await;
     let brokered = brokered(&shared);
-    let paired = Arc::new(Paired::default());
+    let paired = Arc::new(Paired {
+        clock: Arc::clone(&shared),
+        ..Paired::default()
+    });
     let joined = JoinedServerTransport::new(vec![
         Arc::new(memory.clone()),
         Arc::new(brokered.server.clone()),
@@ -564,10 +572,14 @@ async fn asks_each_connection_s_flags_of_the_transport_that_drew_it_and_sends_an
         is_secured: false,
         is_carrying: true,
         is_both_ways: false,
+        clock: Arc::clone(&shared),
         ..Paired::default()
     });
     // a transport that says nothing of a flag: none carried, none secure, two-way
-    let silent = Arc::new(Silent::default());
+    let silent = Arc::new(Silent {
+        clock: Arc::clone(&shared),
+        calls: Mutex::default(),
+    });
     let joined = JoinedServerTransport::new(vec![
         Arc::new(memory.clone()),
         Arc::new(brokered.server.clone()),
@@ -745,7 +757,7 @@ async fn refuses_to_join_two_transports_of_one_type() {
     assert!(
         JoinedServerTransport::new(vec![
             Arc::new(Paired {
-                clock: Some(other),
+                clock: other,
                 ..Paired::default()
             }),
             Arc::new(elsewhere.clone()),
@@ -758,18 +770,13 @@ async fn refuses_to_join_two_transports_of_one_type() {
     let together = JoinedServerTransport::new(vec![
         Arc::new(elsewhere),
         Arc::new(Paired {
-            clock: Some(Arc::clone(&shared)),
+            clock: Arc::clone(&shared),
             ..Paired::default()
         }),
     ])
     .expect("a join");
 
-    assert!(
-        together
-            .clock()
-            .is_some_and(|clock| Arc::ptr_eq(&clock, &shared)),
-        "its one clock"
-    );
+    assert!(Arc::ptr_eq(&together.clock(), &shared), "its one clock");
 }
 
 // spec 15.14
@@ -795,17 +802,10 @@ async fn joins_two_transports_given_no_clock_on_the_platform_s() {
     let brokered = participant
         .server(&BrokerTransportServerOptions::new(["interop"]))
         .expect("a server");
-    let clocks = [
-        memory
-            .clock()
-            .expect("the memory transport's platform clock"),
-        brokered
-            .clock()
-            .expect("the broker transport's platform clock"),
-    ];
+    let clocks = [memory.clock(), brokered.clock()];
     let joined = JoinedServerTransport::new(vec![Arc::new(memory), Arc::new(brokered)])
         .expect("one clock, the platform's");
-    let clock = joined.clock().expect("the join's clock");
+    let clock = joined.clock();
 
     assert_eq!(clock.description(), "the platform's", "the platform's");
 
@@ -839,12 +839,14 @@ async fn stops_every_transport_it_joined_and_sums_their_gauges() {
 
     let paired = Arc::new(Paired {
         held: Some(held),
+        clock: Arc::clone(&shared),
         ..Paired::default()
     });
     // what counts nothing: its connections as its events told them
     let uncounted = Arc::new(Paired {
         kind: "HTTP",
         handle: Arc::from("type=HTTP;ip=127.0.0.1;port=50002;ordinal=1"),
+        clock: Arc::clone(&shared),
         ..Paired::default()
     });
     let joined = JoinedServerTransport::new(vec![
@@ -1067,7 +1069,10 @@ async fn a_joined_transport_pauses_the_connection_on_the_transport_that_drew_it(
     let clock = SteppingClock::new(january_first());
     let shared: SharedClock = Arc::<SteppingClock>::clone(&clock);
     let memory = memory_on(&shared).await;
-    let paired = Arc::new(Paired::default());
+    let paired = Arc::new(Paired {
+        clock: Arc::clone(&shared),
+        ..Paired::default()
+    });
     let joined = JoinedServerTransport::new(vec![
         Arc::new(memory.clone()),
         Arc::<Paired>::clone(&paired),
@@ -1159,6 +1164,7 @@ async fn a_joined_transport_answers_whether_a_connection_takes_a_procedure_by_th
     .expect("a server");
     let paired = Arc::new(Paired {
         taking: Some(vec![address_of(1, 2)]),
+        clock: Arc::clone(&shared),
         ..Paired::default()
     });
     let joined = JoinedServerTransport::new(vec![Arc::new(memory), Arc::<Paired>::clone(&paired)])
@@ -1207,9 +1213,14 @@ async fn a_joined_transport_asks_of_procedures_only_when_one_of_its_transports_n
     let clock = SteppingClock::new(january_first());
     let shared: SharedClock = Arc::<SteppingClock>::clone(&clock);
     let memory = memory_on(&shared).await;
-    let unnamed =
-        JoinedServerTransport::new(vec![Arc::new(memory.clone()), Arc::new(Paired::default())])
-            .expect("a join");
+    let unnamed = JoinedServerTransport::new(vec![
+        Arc::new(memory.clone()),
+        Arc::new(Paired {
+            clock: Arc::clone(&shared),
+            ..Paired::default()
+        }),
+    ])
+    .expect("a join");
 
     assert!(
         !unnamed.names_procedures(),
@@ -1220,6 +1231,7 @@ async fn a_joined_transport_asks_of_procedures_only_when_one_of_its_transports_n
         Arc::new(memory),
         Arc::new(Paired {
             taking: Some(Vec::new()),
+            clock: Arc::clone(&shared),
             ..Paired::default()
         }),
     ])
@@ -1280,6 +1292,10 @@ impl ServerTransport for Stopping {
     fn pause(&self, _connection_handle: &ConnectionHandle) {}
 
     fn resume(&self, _connection_handle: &ConnectionHandle) {}
+
+    fn clock(&self) -> SharedClock {
+        Arc::new(platform_clock().expect("a platform clock"))
+    }
 
     fn stop(&self) -> BoxFuture<Result<(), RouterError>> {
         let gate = locked(&self.gate).take();

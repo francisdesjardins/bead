@@ -13,7 +13,7 @@ use bead::{
     Procedure, ProcedureKind, ProgrammerError, ReadyState, Refusal, RequestResolverDependencies,
     Response, RouterClient, RouterClientOptions, RouterClientTransport, RouterError, RouterServer,
     RouterServerOptions, Sent, ServerListener, ServerTransport, ServiceManager,
-    ServiceManagerOptions, ServiceRouter, TransportMessage,
+    ServiceManagerOptions, ServiceRouter, SharedClock, TransportMessage,
 };
 use bytes::Bytes;
 use libtest_mimic::{Arguments, Failed, Trial};
@@ -29,9 +29,9 @@ const WAYS: [&str; 6] = [
     "client-notification",
 ];
 
-// a client's transport never connected
+// a client's transport never connected, on the platform's clock
 #[derive(Debug)]
-struct Unconnected;
+struct Unconnected(SharedClock);
 
 impl RouterClientTransport for Unconnected {
     fn send(&self, _message: TransportMessage) -> Result<Sent, RouterError> {
@@ -50,14 +50,18 @@ impl RouterClientTransport for Unconnected {
 
     fn resume(&self) {}
 
+    fn clock(&self) -> SharedClock {
+        Arc::clone(&self.0)
+    }
+
     fn ready_state(&self) -> ReadyState {
         ReadyState::Uninitialized
     }
 }
 
-// a server's transport of no connection
+// a server's transport of no connection, on the platform's clock
 #[derive(Debug)]
-struct Unconnecting;
+struct Unconnecting(SharedClock);
 
 impl ServerTransport for Unconnecting {
     fn send(
@@ -80,6 +84,10 @@ impl ServerTransport for Unconnecting {
     fn pause(&self, _connection_handle: &ConnectionHandle) {}
 
     fn resume(&self, _connection_handle: &ConnectionHandle) {}
+
+    fn clock(&self) -> SharedClock {
+        Arc::clone(&self.0)
+    }
 
     fn stop(&self) -> BoxFuture<Result<(), RouterError>> {
         Box::pin(async { Ok(()) })
@@ -113,8 +121,15 @@ struct Routers {
 }
 
 fn routers() -> Result<Routers, ProgrammerError> {
-    let client = RouterClient::new(Arc::new(Unconnected), &RouterClientOptions::default())?;
-    let server = RouterServer::new(Arc::new(Unconnecting), &RouterServerOptions::default())?;
+    let clock: SharedClock = Arc::new(testing::platform_clock()?);
+    let client = RouterClient::new(
+        Arc::new(Unconnected(Arc::clone(&clock))),
+        &RouterClientOptions::default(),
+    )?;
+    let server = RouterServer::new(
+        Arc::new(Unconnecting(clock)),
+        &RouterServerOptions::default(),
+    )?;
 
     Ok(Routers {
         client_services: ServiceManager::new(

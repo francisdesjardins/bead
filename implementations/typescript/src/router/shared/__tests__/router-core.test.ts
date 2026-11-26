@@ -2850,6 +2850,7 @@ test.describe('createRouterCore', () => {
       const sent: (Envelope | undefined)[] = [];
       const asked: IProcedureAddress[] = [];
       const transport: routerServer.IRouterServerTransportLike = {
+        clock: routerServer.PLATFORM_CLOCK,
         // oxlint-disable-next-line typescript/unbound-method -- `createEmitter` returns arrow functions, which have no `this` to lose
         off: emitter.off,
         // oxlint-disable-next-line typescript/unbound-method -- as above

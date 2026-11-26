@@ -60,7 +60,7 @@ impl ServerTransport for Asking {
         self.scripted.resume(connection_handle);
     }
 
-    fn clock(&self) -> Option<SharedClock> {
+    fn clock(&self) -> SharedClock {
         self.scripted.clock()
     }
 

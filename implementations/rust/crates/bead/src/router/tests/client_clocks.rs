@@ -1,15 +1,15 @@
-//! The client's router shares its transport's clock, takes one when the transport has none,
-//! and refuses a different one before registering a listener.
+//! The client's router shares its transport's clock and refuses a different one before registering
+//! a listener.
 
 use std::sync::Arc;
 
 use crate::clock::{SharedClock, SystemClock, SystemClockOptions};
 use crate::router::client::{RouterClient, RouterClientOptions};
 use crate::testing::SteppingClock;
-use crate::testing::clockless::Clockless;
 use crate::testing::scripted::ScriptedClient;
 
-async fn transport_clock() {
+#[tokio::test]
+async fn runs_on_its_transports_clock_and_refuses_another() {
     let clock: SharedClock = SteppingClock::new(super::january_first());
     let system: SharedClock =
         Arc::new(SystemClock::new(&SystemClockOptions::default()).expect("a system clock"));
@@ -25,12 +25,12 @@ async fn transport_clock() {
     };
     let same = RouterClient::new(Arc::<ScriptedClient>::clone(&transport), &given)
         .expect("the same clock");
-    let without = Arc::new(Clockless(Arc::<ScriptedClient>::clone(&transport)));
-    let on_own = RouterClient::new(Arc::<Clockless<ScriptedClient>>::clone(&without), &given)
-        .expect("the given clock");
-    let alone =
-        RouterClient::new(without, &RouterClientOptions::default()).expect("the platform's clock");
-    for router in [&on_transport, &same, &on_own] {
+    let alone = RouterClient::new(
+        ScriptedClient::new(Arc::clone(&system)),
+        &RouterClientOptions::default(),
+    )
+    .expect("the platform's clock");
+    for router in [&on_transport, &same] {
         assert!(Arc::ptr_eq(&router.clock(), &clock));
     }
     assert_eq!(alone.clock().description(), "the platform's");
@@ -48,19 +48,8 @@ async fn transport_clock() {
         "a client's router runs on the clock of its transport, one of its own, and was given another, the platform's"
     );
     assert_eq!(transport.listener_count(), before);
-    for router in [on_transport, same, on_own, alone] {
+    for router in [on_transport, same, alone] {
         router.dispose().await;
     }
     assert_eq!(transport.listener_count(), 0);
-}
-
-#[tokio::test]
-async fn runs_on_its_transports_clock_or_on_the_one_it_is_given_when_its_transport_has_none_and_refuses_one_that_differs()
- {
-    transport_clock().await;
-}
-
-#[tokio::test]
-async fn runs_on_its_transports_clock_and_refuses_another() {
-    transport_clock().await;
 }

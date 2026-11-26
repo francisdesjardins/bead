@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test';
+import { PLATFORM_CLOCK } from '../../../transport/shared/clock';
 import { ProgrammerError } from '../../../transport/shared/errors';
 import { noop } from '../../../transport/shared/noop';
 import { createRouterServer } from '../../server/router-server';
@@ -33,6 +34,7 @@ test.describe('wholeEnvelopeLimitsOf', () => {
     expect(() => {
       createRouterServer(
         {
+          clock: PLATFORM_CLOCK,
           off: () => {},
           on: () => {},
           pause: noop,

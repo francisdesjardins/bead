@@ -2077,16 +2077,15 @@ async fn refuses_a_close_timeout_past_the_longest_timer_and_runs_on_the_clock_it
     .unwrap();
 
     assert!(
-        server
-            .clock()
-            .is_some_and(|given| Arc::ptr_eq(&given, &clock)),
+        Arc::ptr_eq(&server.clock(), &clock),
         "the clock it was given"
     );
-    assert!(
+    assert_eq!(
         WebSocketTransportServer::new(&WebSocketTransportServerOptions::default())
             .unwrap()
             .clock()
-            .is_some_and(|platform| platform.description() == "the platform's"),
+            .description(),
+        "the platform's",
         "none given"
     );
 }

@@ -2029,8 +2029,8 @@ impl RouterClientTransport for HttpTransportClient {
         }
     }
 
-    fn clock(&self) -> Option<SharedClock> {
-        Some(Arc::clone(&self.inner.clock))
+    fn clock(&self) -> SharedClock {
+        Arc::clone(&self.inner.clock)
     }
 
     // by the URL its last connect named: under `https`, or to a host on the loopback

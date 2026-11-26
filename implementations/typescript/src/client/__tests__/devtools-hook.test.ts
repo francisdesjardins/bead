@@ -7,7 +7,13 @@ import { EnvelopeKind } from '../../router/shared/constants';
 import { bytesOf, readEnvelope, writeEnvelope } from '../../router/shared/envelope';
 import { createMetricsRegistry } from '../../router/shared/metrics-registry';
 import type { IDebugEvent } from '../../router/shared/types';
-import { createClient, SERVER_FAILURES, type IClientTransportLike } from '../client';
+import {
+  createClient,
+  PLATFORM_CLOCK,
+  SERVER_FAILURES,
+  type IClientTransportLike,
+  type IClock,
+} from '../client';
 import {
   announceToDevtools,
   DEVTOOLS_HOOK_KEY,
@@ -39,14 +45,20 @@ const serializer = {
   },
 };
 
-/** A transport that answers each request with its own payload. */
-const createEchoTransport = (): IClientTransportLike => {
+/**
+ * A transport that answers each request with its own payload, on the clock it is given: the
+ * platform's by default.
+ */
+const createEchoTransport = ({
+  clock = PLATFORM_CLOCK,
+}: { clock?: IClock | undefined } = {}): IClientTransportLike => {
   const emitter = createEmitter<{
     close: [wasClean: boolean, wasQuick: boolean];
     message: [message: ITransportMessage];
   }>();
 
   return {
+    clock,
     off: emitter.off,
     on: emitter.on,
     connect: () => {

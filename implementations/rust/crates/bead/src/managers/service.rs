@@ -473,12 +473,11 @@ impl ServiceManager {
     ) -> Result<Self, ProgrammerError> {
         let below = port.clock();
         let clock = crate::clock::clock_of(&crate::clock::LayeredClocks {
-            beneath: Some(&below),
+            beneath: &below,
             given: options.clock.as_ref(),
             layer: "a service manager",
             below: "its router",
-        })?
-        .unwrap_or(below);
+        })?;
         let defaults = options.defaults.clone().unwrap_or_default();
         // held as the manager is built, rather than refused at each call it would time
         let timeout = hold(

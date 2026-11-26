@@ -93,7 +93,7 @@ async fn a_layer_runs_on_the_clock_of_the_one_beneath_it_unless_given_one_and_re
     let beneath: SharedClock = SteppingClock::new(instants::new_year());
     let given: SharedClock = SteppingClock::new(instants::new_year());
     let platform: SharedClock = Arc::new(platform_clock().expect("a platform clock"));
-    let layered = |(beneath, given): (Option<&SharedClock>, Option<&SharedClock>)| {
+    let layered = |(beneath, given): (&SharedClock, Option<&SharedClock>)| {
         clock_of(&LayeredClocks {
             beneath,
             given,
@@ -101,26 +101,15 @@ async fn a_layer_runs_on_the_clock_of_the_one_beneath_it_unless_given_one_and_re
             below: "its transport",
         })
     };
-    for (below, own, expected) in [
-        (Some(&beneath), None, &beneath),
-        (Some(&beneath), Some(&beneath), &beneath),
-        (None, Some(&given), &given),
-    ] {
+    for own in [None, Some(&beneath)] {
         assert!(Arc::ptr_eq(
-            &layered((below, own))
-                .expect("one clock")
-                .expect("a clock selected"),
-            expected
+            &layered((&beneath, own)).expect("one clock"),
+            &beneath
         ));
     }
-    assert!(
-        layered((None, None))
-            .expect("the builder supplies its platform clock")
-            .is_none()
-    );
     for (given, description) in [(&given, "one of its own"), (&platform, "the platform's")] {
         assert_eq!(
-            layered((Some(&beneath), Some(given)))
+            layered((&beneath, Some(given)))
                 .expect_err("two clocks")
                 .message(),
             format!(
