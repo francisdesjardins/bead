@@ -52,7 +52,9 @@ import {
 import {
   answerBeforeClose,
   assertCount,
+  boundHandshakeOf,
   boundHeadOf,
+  boundSessionOf,
   createSendPace,
   droppedOf,
   HEADERS_TIMEOUT,
@@ -1187,9 +1189,11 @@ export const createHTTPTransportServer = (
 
             const instance = createServer(onExchange, { address: host });
 
-            // * its head within `headersTimeout`, judged each second, its 408 the server's own; no
+            // * its head within `headersTimeout`, judged each second, its 408 the server's own; a
+            // kept-alive socket, an HTTP/2 session and a TLS handshake idle no longer than that; no
             // time for the whole request, which a body's rate holds instead (spec 15.12)
             boundHeadOf(instance, headersTimeout);
+            boundHandshakeOf(instance, { headersTimeout, platform });
             answerBeforeClose(instance);
 
             const entry = {
@@ -1204,6 +1208,7 @@ export const createHTTPTransportServer = (
               entry.onError(error);
             });
             entry.instance.on('session', (session) => {
+              boundSessionOf(session, { headersTimeout, platform });
               sessions.add(session);
               session.once('close', () => {
                 sessions.delete(session);

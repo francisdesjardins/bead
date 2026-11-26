@@ -35,7 +35,9 @@ import { TranscodingProcedures } from './generated/transcoding_bead';
 import { EdgesSchema, TickSchema } from './generated/transcoding_pb';
 import { NeedsSchema } from './generated/transcoding-required_pb';
 import {
+  closedAfter,
   closingAnswerOf,
+  expectIdleEnd,
   MOST_TAKEN,
   rawAnswerOf,
   rawSocketOn,
@@ -43,7 +45,11 @@ import {
   statusesOf,
   takenUntilStalled,
 } from '../../transport/server/__tests__/http-transport-server-fixtures';
-import { rawResetOverHTTP2 } from '../../transport/server/__tests__/raw-http2';
+import {
+  idleEndsOverHTTP2,
+  PREFACE_AND_SETTINGS,
+  rawResetOverHTTP2,
+} from '../../transport/server/__tests__/raw-http2';
 import { TLS_FIXTURE } from '../../transport/server/__tests__/tls-fixture';
 import {
   GOOD_CREDENTIAL,
@@ -304,13 +310,16 @@ const until = async (condition: () => boolean, within = 2_000): Promise<void> =>
 };
 
 /** A gateway under TLS, HTTP/2 and HTTP/1.1 on one port, over the transcoding service. */
-const startSecureTranscoding = (): Promise<ITranscodingFixture> => {
+const startSecureTranscoding = (
+  options: { headersTimeout?: number } = {}
+): Promise<ITranscodingFixture> => {
   return startTranscoding({
     createServer: (listener) => {
       return createSecureServer({ ...TLS_FIXTURE, allowHTTP1: true }, (request, response) => {
         listener(request, response);
       });
     },
+    ...options,
   });
 };
 
@@ -3114,6 +3123,43 @@ test('resets over HTTP/2 the stream of a request whose Content-Length passes 2�
   }
 
   expect(drawn).toEqual([]);
+});
+
+// spec 15.12
+test('closes a kept-alive socket idle past headers timeout at its own listener without another response', async () => {
+  await using fixture = await startTranscoding({
+    createServer: (listener) => {
+      return createNodeServer(listener);
+    },
+    headersTimeout: 1_000,
+  });
+  const { read, socket } = await rawSocketOn(fixture.port);
+
+  try {
+    socket.write(`GET /v1/books/2 HTTP/1.1\r\nhost: 127.0.0.1:${String(fixture.port)}\r\n\r\n`);
+    await expect
+      .poll(() => {
+        return read.text.endsWith('"title":"A tale"}');
+      })
+      .toBe(true);
+    expect(read.text).toMatch(/^HTTP\/1\.1 200 /u);
+    const answer = read.text;
+
+    expectIdleEnd(await closedAfter(socket));
+    expect(read.text).toBe(answer);
+  } finally {
+    socket.destroy();
+  }
+});
+
+// spec 15.12
+test('ends an HTTP/2 session at its own listener that reads no request’s head within headers timeout', async () => {
+  await using fixture = await startSecureTranscoding({ headersTimeout: 1_000 });
+  const ends = await idleEndsOverHTTP2(fixture.port, [Buffer.alloc(0), PREFACE_AND_SETTINGS]);
+
+  for (const [index, elapsed] of ends.entries()) {
+    expectIdleEnd(elapsed, `socket ${String(index)}`);
+  }
 });
 
 test('refuses a route off its template’s grammar, and listens once', async () => {

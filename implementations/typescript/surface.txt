@@ -3514,6 +3514,7 @@ src/transport/server/types.ts IHTTPServerLike
     on(event: 'session', listener: (session: IHTTPSessionLike) => void): unknown
     connectionsCheckingInterval?: number | undefined
     headersTimeout?: number | undefined
+    keepAliveTimeout?: number | undefined
     requestTimeout?: number | undefined
 src/transport/server/types.ts IHTTPTransportServerOptions
   interface IHTTPTransportServerOptions extends ITransportServerOptions, IHTTPPolicyOption

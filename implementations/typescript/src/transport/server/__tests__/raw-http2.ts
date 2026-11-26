@@ -1,6 +1,7 @@
-import { connect as connectTLS } from 'node:tls';
+import { once } from 'node:events';
+import { connect as connectTLS, type TLSSocket } from 'node:tls';
 import { BEAD_MEDIA_TYPE } from '../../shared/constants';
-import { host } from './http-transport-server-fixtures';
+import { closedAfter, host } from './http-transport-server-fixtures';
 import { TLS_FIXTURE } from './tls-fixture';
 
 /**
@@ -118,4 +119,78 @@ export const rawResetOverHTTP2 = (
       }
     });
   });
+};
+
+/** A client's preface and an empty SETTINGS (RFC 9113 §3.4): a session begun, no request in it. */
+export const PREFACE_AND_SETTINGS = Buffer.concat([
+  Buffer.from('PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n'),
+  frameOf(0x4, {}),
+]);
+
+/** A PING (RFC 9113 §6.7), its 8 bytes of data zero. */
+export const PING = frameOf(0x6, { payload: Buffer.alloc(8) });
+
+/**
+ * The first of a HEADERS never whole: END_STREAM without END_HEADERS, on stream 1, its one field
+ * `:method: GET`, no CONTINUATION behind it.
+ */
+export const HEADERS_NEVER_WHOLE = frameOf(0x1, {
+  flags: 0x1,
+  payload: Buffer.from([0x82]),
+  stream: 1,
+});
+
+/**
+ * A socket under TLS to the server on `port`, offering `alpn` alone, once its handshake ended: what
+ * it reads, as it comes, and whether it closed.
+ */
+export const tlsSocketOn = async (port: number, alpn: string) => {
+  const socket: TLSSocket = connectTLS({
+    ALPNProtocols: [alpn],
+    ca: TLS_FIXTURE.cert,
+    host,
+    port,
+    servername: 'localhost',
+  });
+  const read = { isClosed: false, text: '' };
+
+  socket.on('data', (chunk: Buffer) => {
+    read.text += chunk.toString('latin1');
+  });
+  socket.on('error', () => {});
+  socket.on('close', () => {
+    read.isClosed = true;
+  });
+  await once(socket, 'secureConnect');
+
+  return { read, socket };
+};
+
+/**
+ * When each of sockets under TLS to `port` over `h2` closes, from its handshake's end, each having
+ * written one of `prefixes` and nothing more: in milliseconds, or `undefined` past 5 s.
+ */
+export const idleEndsOverHTTP2 = async (port: number, prefixes: readonly Buffer[]) => {
+  const opened = await Promise.all(
+    prefixes.map(async (prefix) => {
+      const { socket } = await tlsSocketOn(port, 'h2');
+      const ending = closedAfter(socket);
+
+      socket.write(prefix);
+
+      return { ending, socket };
+    })
+  );
+
+  try {
+    return await Promise.all(
+      opened.map(({ ending }) => {
+        return ending;
+      })
+    );
+  } finally {
+    for (const { socket } of opened) {
+      socket.destroy();
+    }
+  }
 };

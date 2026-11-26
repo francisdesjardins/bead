@@ -1106,10 +1106,13 @@ The server bounds what its clients hold: `maximumConnections`, 10 000, and 64 pe
 `maximumWaitingExchanges`, 64 requests waiting on one connection, its router's
 `maximumAnsweringCalls` in `createHTTPServer`; `bodyBytesBudget`, 256 MiB of body read at once
 across them all. A head comes whole within `headersTimeout`, 30 seconds, or Node's own parser
-answers it 408: the transport sets `headersTimeout`, a `requestTimeout` of 0 and a
-`connectionsCheckingInterval` of a second on every server `createServer` builds, before it listens,
-and a `clientError` listener that lets the answer under way end where Node's parser refuses bytes
-behind a request that asked its connection closed, Node's own answer to every other refusal kept.
+answers it 408: the transport sets `headersTimeout`, a `keepAliveTimeout` of the same time, a
+`requestTimeout` of 0 and a `connectionsCheckingInterval` of a second on every server `createServer`
+builds, before it listens, and times each HTTP/2 session and each TLS handshake to `headersTimeout`
+itself: a socket or a session with no head and no answer under way closes past it, its Bead
+connection kept. It also sets a `clientError` listener that lets the answer under way end where
+Node's parser refuses bytes behind a request that asked its connection closed, Node's own answer to
+every other refusal kept.
 A body comes at `minimumBodyBytesPerSecond`, 240, once `bodyGracePeriod`, 5 seconds, passed since
 its head, on the server's clock, or is refused 408 `too-slow`, its Bead connection kept. An answer
 written before its body is whole carries `connection: close`, and its socket closes in stages, its

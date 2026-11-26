@@ -65,7 +65,7 @@ import {
   type IFakeSocket,
 } from './fake-websocket-server';
 import { frameOf, OPCODES, openExchange } from './http-peer';
-import { closingAnswerOf } from './http-transport-server-fixtures';
+import { closedAfter, closingAnswerOf, expectIdleEnd } from './http-transport-server-fixtures';
 
 type ServerEvents = TransportServerEventMap<IServerSocketLike, IDrawingRequest>;
 
@@ -4547,6 +4547,48 @@ test.describe('WebSocketTransportServer, the head it reads', () => {
     const { answer } = await answerFromOf(port, 'GET / HTTP/1.1\r\nHost: bead.test\r\n');
 
     expect([answer, refusals]).toEqual([[408, null], []]);
+  });
+
+  // spec 15.12
+  test('closes a socket silent from its open at a WebSocket’s address past headers timeout', async () => {
+    await using started = await startDated({ headersTimeout: 1_000 });
+    const socket = await openTcp(started.port);
+
+    // read, so its close is heard: whether a 408 comes first is the platform's
+    socket.resume();
+    socket.on('error', () => {});
+
+    try {
+      expectIdleEnd(await closedAfter(socket));
+    } finally {
+      socket.destroy();
+    }
+  });
+
+  // spec 15.12
+  test('keeps an upgraded WebSocket silent past headers timeout', async () => {
+    await using started = await startDated({ headersTimeout: 200 });
+    const { port, server } = started;
+    const socket = new WsClient(`ws://${host}:${String(port)}`);
+
+    socket.on('error', () => {});
+    await once(socket, 'open');
+
+    // its message echoed back to it, as a router answering it would
+    server.on('message', ({ data }, heardOn) => {
+      void server.send({ data }, heardOn);
+    });
+    await sleep(3 * 200);
+
+    expect(socket.readyState).toBe(WsClient.OPEN);
+    const echoed = once(socket, 'message');
+
+    socket.send(Uint8Array.of(0xa1, 0x11));
+
+    const [data] = (await echoed) as [Buffer];
+
+    expect([[...data], server.clients.length]).toEqual([[0xa1, 0x11], 1]);
+    socket.close();
   });
 
   test('refuses 431 a head past 16 KiB, its request line among it, as Node’s maxHeaderSize bounds it, and takes 101 fields', async () => {

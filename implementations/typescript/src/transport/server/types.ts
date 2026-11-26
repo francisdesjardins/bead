@@ -27,6 +27,7 @@ import type {
 } from '../shared/types';
 import type { IHTTPPolicyOption } from './http-policy';
 import type {
+  IBoundStreamLike,
   IClientErrorSocketLike,
   IHeadBoundServerLike,
   ILingeringSocketLike,
@@ -565,8 +566,8 @@ export interface IWebSocketTransportServerOptions extends ITransportServerOption
   /**
    * Milliseconds a request's head may take to come whole, judged each second by Node's own parser,
    * which answers it 408 past them, unmarked, its connection closed (spec 15.12): from 1 to
-   * 2³¹ − 1, rounded to the nearest whole one; 0 and `Infinity` are refused. Defaults to
-   * {@link HEADERS_TIMEOUT}.
+   * 2³¹ − 1, rounded to the nearest whole one; 0 and `Infinity` are refused. A socket before its
+   * upgrade with no answer under way is closed past them too. Defaults to {@link HEADERS_TIMEOUT}.
    */
   headersTimeout?: number | undefined;
   /**
@@ -826,9 +827,14 @@ export interface IHTTPResponseLike {
   writeHead(statusCode: number, headers?: Record<string, string>): unknown;
 }
 
-/** The part of an HTTP/2 session this transport touches: its close, and the end of it. */
+/**
+ * The part of an HTTP/2 session this transport touches: its streams, which its idle bound counts,
+ * its close, and the end of it.
+ */
 export interface IHTTPSessionLike {
   close(): unknown;
+  destroy(): unknown;
+  on(event: 'stream', listener: (stream: IBoundStreamLike) => void): unknown;
   once(event: 'close', listener: () => void): unknown;
 }
 
@@ -880,9 +886,10 @@ export interface IHTTPTransportServerOptions extends ITransportServerOptions, IH
    * Builds a server on the transport's listener: `(listener) => createServer(listener)` from
    * `node:http`, `(listener) => createServer({ key, cert }, listener)` from `node:https`, or
    * `createSecureServer({ allowHTTP1: true, … }, listener)` from `node:http2`. The transport sets
-   * its `headersTimeout` to its own, its `requestTimeout` to 0 and its `connectionsCheckingInterval`
-   * to a second before it listens, where the server has them, as `node:http`'s and `node:https`'s
-   * do; its `keepAliveTimeout` is the application's to set. It is
+   * its `headersTimeout` and its `keepAliveTimeout` to its own `headersTimeout`, its
+   * `requestTimeout` to 0 and its `connectionsCheckingInterval` to a second before it listens,
+   * where the server has them, as `node:http`'s, `node:https`'s and the secure one of `node:http2`
+   * do; it times each HTTP/2 session and each TLS handshake to its `headersTimeout` itself. It is
    * called once per address the transport binds, told it as `address`: on `localhost`, twice,
    * `127.0.0.1` then `::1`, so every server it builds is to be configured alike — a certificate
    * rotated by `setSecureContext`, an SNI context added, a timeout, a `tlsClientError` listener —
@@ -915,8 +922,9 @@ export interface IHTTPTransportServerOptions extends ITransportServerOptions, IH
   /**
    * Milliseconds a request's head may take to come whole, judged each second by the server's own
    * parser, which answers it 408 past them, unmarked, its connection closed (spec 15.12): from 1 to
-   * 2³¹ − 1, rounded to the nearest whole one; 0 and `Infinity` are refused. Defaults to
-   * {@link HEADERS_TIMEOUT}.
+   * 2³¹ − 1, rounded to the nearest whole one; 0 and `Infinity` are refused. A socket or an HTTP/2
+   * session with no head and no answer under way, and a TLS handshake, are closed past them too.
+   * Defaults to {@link HEADERS_TIMEOUT}.
    */
   headersTimeout?: number | undefined;
   /**
