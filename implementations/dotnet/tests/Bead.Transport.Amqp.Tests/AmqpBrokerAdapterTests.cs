@@ -3120,12 +3120,14 @@ public sealed class AmqpBrokerAdapterTests : IAsyncLifetime
     [Fact]
     public async Task Fails_its_start_once_its_password_provider_outlives_its_connect_timeout_and_takes_no_late_answer()
     {
+        var clock = new SteppingClock(DateTimeOffset.UnixEpoch);
         var late = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
         await using var adapter = AdapterOf((options) =>
         {
             return options with
             {
                 ConnectTimeout = TimeSpan.FromMilliseconds(200),
+                Platform = clock,
                 Password = null,
                 PasswordProvider = (_) =>
                 {
@@ -3135,10 +3137,16 @@ public sealed class AmqpBrokerAdapterTests : IAsyncLifetime
         });
         var (_, downs) = HeardOf(adapter);
 
-        Assert.Equal("the link of ada had no password within 200 ms, its connectTimeout", Assert.IsType<TimeoutException>(await FailureOf(() =>
+        var failing = FailureOf(() =>
         {
             return adapter.Start();
-        })).Message);
+        });
+
+        Assert.Contains(TimeSpan.FromMilliseconds(200), await clock.UntilArmed(TimeSpan.FromMilliseconds(200), Patience));
+        await clock.Advance(TimeSpan.FromMilliseconds(199));
+        Assert.False(failing.IsCompleted);
+        await clock.Advance(TimeSpan.FromMilliseconds(1));
+        Assert.Equal("the link of ada had no password within 200 ms, its connectTimeout", Assert.IsType<TimeoutException>(await failing.WaitAsync(Patience, Cancelled)).Message);
 
         // * its answer, come too late, opens no connection
         late.SetResult(Password);
@@ -3159,24 +3167,32 @@ public sealed class AmqpBrokerAdapterTests : IAsyncLifetime
             return options with
             {
                 ConnectTimeout = TimeSpan.FromMilliseconds(600),
+                Platform = clock,
                 Password = null,
                 PasswordProvider = async (token) =>
                 {
-                    await Task.Delay(450, token);
+                    await Task.Delay(TimeSpan.FromMilliseconds(450), clock, token);
 
                     return Password;
                 },
             };
         });
-        var began = Stopwatch.StartNew();
+        var began = clock.GetTimestamp();
         var waiting = FailureOf(() =>
         {
             return slow.Start();
         });
+        Assert.Contains(TimeSpan.FromMilliseconds(450), await clock.UntilArmed(TimeSpan.FromMilliseconds(450), Patience));
+        await clock.Advance(TimeSpan.FromMilliseconds(449));
+        Assert.False(waiting.IsCompleted);
+        await clock.Advance(TimeSpan.FromMilliseconds(1));
         var held = await _script.Connection();
 
-        Assert.Equal("the link of ada had no OPEN and no sessions within 600 ms, its connectTimeout", Assert.IsType<TimeoutException>(await waiting).Message);
-        Assert.True(began.Elapsed < TimeSpan.FromMilliseconds(900));
+        await clock.Advance(TimeSpan.FromMilliseconds(149));
+        Assert.False(waiting.IsCompleted);
+        await clock.Advance(TimeSpan.FromMilliseconds(1));
+        Assert.Equal("the link of ada had no OPEN and no sessions within 600 ms, its connectTimeout", Assert.IsType<TimeoutException>(await waiting.WaitAsync(Patience, Cancelled)).Message);
+        Assert.Equal(TimeSpan.FromMilliseconds(600), clock.GetElapsedTime(began));
         await held.Closed.WaitAsync(Patience, Cancelled);
     }
 
@@ -3744,7 +3760,11 @@ public sealed class AmqpBrokerAdapterTests : IAsyncLifetime
     {
         _script.SenderCredit = 1;
 
-        await using var adapter = AdapterOf();
+        var clock = new SteppingClock(DateTimeOffset.UnixEpoch);
+        await using var adapter = AdapterOf((options) =>
+        {
+            return options with { ConnectTimeout = TimeSpan.FromMilliseconds(1_000), Platform = clock };
+        });
         var connection = await LinkUp((adapter, _script));
         var published = Enumerable.Range(1, 3).Select((each) =>
         {
@@ -3760,7 +3780,8 @@ public sealed class AmqpBrokerAdapterTests : IAsyncLifetime
         var stopping = adapter.Stop();
 
         // * its stop waits for what it was handed, its credit given late, then ends its link
-        await Task.Delay(200, Cancelled);
+        Assert.Contains(TimeSpan.FromMilliseconds(1_000), await clock.UntilArmed(TimeSpan.FromMilliseconds(1_000), Patience));
+        await clock.Advance(TimeSpan.FromMilliseconds(700));
         Assert.False(stopping.IsCompleted);
         Assert.Single(TransfersTo((connection, "/exchanges/bead/bead.i.peer")));
         Assert.Empty(connection.Of<AmqpClose>());
@@ -3797,7 +3818,7 @@ public sealed class AmqpBrokerAdapterTests : IAsyncLifetime
         // same
         await using var bounded = AdapterOf((options) =>
         {
-            return options with { ConnectTimeout = TimeSpan.FromMilliseconds(300) };
+            return options with { ConnectTimeout = TimeSpan.FromMilliseconds(1_000), Platform = clock };
         });
         var held = await LinkUp((bounded, _script));
         var sent = bounded.Publish(new BrokerPublication { Topic = PeerInbox, Payload = (byte[])[4] });
@@ -3806,7 +3827,14 @@ public sealed class AmqpBrokerAdapterTests : IAsyncLifetime
 
         var waiting = bounded.Publish(new BrokerPublication { Topic = PeerInbox, Payload = (byte[])[5] });
 
-        await bounded.Stop().WaitAsync(Patience, Cancelled);
+        var stoppingBounded = bounded.Stop();
+
+        Assert.Contains(TimeSpan.FromMilliseconds(1_000), await clock.UntilArmed(TimeSpan.FromMilliseconds(1_000), Patience));
+        await clock.Advance(TimeSpan.FromMilliseconds(999));
+        Assert.False(stoppingBounded.IsCompleted);
+        Assert.Empty(held.Of<AmqpClose>());
+        await clock.Advance(TimeSpan.FromMilliseconds(1));
+        await stoppingBounded.WaitAsync(Patience, Cancelled);
         Assert.Equal("the link of ada stopped", Assert.IsType<IOException>(await FailureOf(() =>
         {
             return waiting;

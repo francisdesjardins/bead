@@ -2769,12 +2769,14 @@ public sealed class MqttBrokerAdapterTests : IAsyncLifetime
     [Fact]
     public async Task Fails_its_start_once_its_password_provider_outlives_its_connect_timeout_and_takes_no_late_answer()
     {
+        var clock = new SteppingClock(DateTimeOffset.UnixEpoch);
         var late = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
         await using var adapter = AdapterOf((options) =>
         {
             return options with
             {
                 ConnectTimeout = TimeSpan.FromMilliseconds(200),
+                Platform = clock,
                 Password = null,
                 PasswordProvider = (_) =>
                 {
@@ -2784,10 +2786,16 @@ public sealed class MqttBrokerAdapterTests : IAsyncLifetime
         });
         var (_, downs) = HeardOf(adapter);
 
-        Assert.Equal("the link of ada had no password within 200 ms, its connectTimeout", Assert.IsType<TimeoutException>(await FailureOf(() =>
+        var failing = FailureOf(() =>
         {
             return adapter.Start();
-        })).Message);
+        });
+
+        Assert.Contains(TimeSpan.FromMilliseconds(200), await clock.UntilArmed(TimeSpan.FromMilliseconds(200), Patience));
+        await clock.Advance(TimeSpan.FromMilliseconds(199));
+        Assert.False(failing.IsCompleted);
+        await clock.Advance(TimeSpan.FromMilliseconds(1));
+        Assert.Equal("the link of ada had no password within 200 ms, its connectTimeout", Assert.IsType<TimeoutException>(await failing.WaitAsync(Patience, Cancelled)).Message);
 
         // * its answer, come too late, opens no network connection
         late.SetResult(Password);
@@ -2803,24 +2811,32 @@ public sealed class MqttBrokerAdapterTests : IAsyncLifetime
             return options with
             {
                 ConnectTimeout = TimeSpan.FromMilliseconds(600),
+                Platform = clock,
                 Password = null,
                 PasswordProvider = async (token) =>
                 {
-                    await Task.Delay(450, token);
+                    await Task.Delay(TimeSpan.FromMilliseconds(450), clock, token);
 
                     return Password;
                 },
             };
         });
-        var began = Stopwatch.StartNew();
+        var began = clock.GetTimestamp();
         var waiting = FailureOf(() =>
         {
             return slow.Start();
         });
 
+        Assert.Contains(TimeSpan.FromMilliseconds(450), await clock.UntilArmed(TimeSpan.FromMilliseconds(450), Patience));
+        await clock.Advance(TimeSpan.FromMilliseconds(449));
+        Assert.False(waiting.IsCompleted);
+        await clock.Advance(TimeSpan.FromMilliseconds(1));
         await _script.Link();
-        Assert.Equal("the link of ada had no CONNACK within 600 ms, its connectTimeout", Assert.IsType<TimeoutException>(await waiting).Message);
-        Assert.True(began.Elapsed < TimeSpan.FromMilliseconds(900));
+        await clock.Advance(TimeSpan.FromMilliseconds(149));
+        Assert.False(waiting.IsCompleted);
+        await clock.Advance(TimeSpan.FromMilliseconds(1));
+        Assert.Equal("the link of ada had no CONNACK within 600 ms, its connectTimeout", Assert.IsType<TimeoutException>(await waiting.WaitAsync(Patience, Cancelled)).Message);
+        Assert.Equal(TimeSpan.FromMilliseconds(600), clock.GetElapsedTime(began));
     }
 
     [Fact]
@@ -3778,9 +3794,10 @@ public sealed class MqttBrokerAdapterTests : IAsyncLifetime
     [Fact]
     public async Task Sends_its_stop_s_DISCONNECT_of_0x00_all_the_same_where_an_UNSUBACK_refuses_or_none_comes_what_it_was_handed_and_its_UNSUBACKs_awaited_within_one_connectTimeout_of_its_call_spec_15_26_15_30()
     {
+        var clock = new SteppingClock(DateTimeOffset.UnixEpoch);
         await using var adapter = AdapterOf((options) =>
         {
-            return options with { ConnectTimeout = TimeSpan.FromMilliseconds(1_000) };
+            return options with { ConnectTimeout = TimeSpan.FromMilliseconds(1_000), Platform = clock };
         });
         var (_, downs) = HeardOf(adapter);
         var link = await LinkUp((adapter, _script));
@@ -3797,11 +3814,14 @@ public sealed class MqttBrokerAdapterTests : IAsyncLifetime
 
         var publishing = adapter.Publish(new BrokerPublication { Topic = ["bead", "i", "bob"], Payload = (byte[])[1] });
         var publish = await link.Next<MqttPublishPacket>();
-        var watch = Stopwatch.StartNew();
+        var began = clock.GetTimestamp();
         var stopping = adapter.Stop();
 
-        // * half its connectTimeout spent on what it was handed
-        await Task.Delay(500, Cancelled);
+        // * most of its connectTimeout spent on what it was handed
+        Assert.Contains(TimeSpan.FromMilliseconds(1_000), await clock.UntilArmed(TimeSpan.FromMilliseconds(1_000), Patience));
+        await clock.Advance(TimeSpan.FromMilliseconds(700));
+        Assert.False(stopping.IsCompleted);
+        Assert.Empty(link.PacketsOf<MqttUnsubscribePacket>());
         await PubAckOf((link, publish.PacketIdentifier, 0));
         Assert.Equal(BrokerPublished.Taken, await publishing.WaitAsync(Patience, Cancelled));
 
@@ -3810,12 +3830,21 @@ public sealed class MqttBrokerAdapterTests : IAsyncLifetime
         // the second's UNSUBACK withheld
         await link.Next<MqttUnsubscribePacket>();
         await link.Send(new MqttUnsubAckPacket { PacketIdentifier = refused.PacketIdentifier, ReasonCodes = [MqttUnsubscribeReasonCode.UnspecifiedError] });
+
+        // * its PUBACK proves the receive loop read the refused UNSUBACK before its bound fires
+        adapter.Message += (message) =>
+        {
+            message.Settle();
+        };
+        await link.Send(PublishOf((Assert.Single(refused.TopicFilters), [2], 11)));
+        Assert.Equal((ushort)11, (await link.Next<MqttPubAckPacket>(Patience)).PacketIdentifier);
+        await clock.Advance(TimeSpan.FromMilliseconds(299));
+        Assert.False(stopping.IsCompleted);
+        Assert.Empty(link.PacketsOf<MqttDisconnectPacket>());
+        await clock.Advance(TimeSpan.FromMilliseconds(1));
         await stopping.WaitAsync(Patience, Cancelled);
 
-        var spent = watch.Elapsed;
-
-        Assert.True(spent >= TimeSpan.FromMilliseconds(950), $"its connectTimeout waited, {spent.TotalMilliseconds} ms");
-        Assert.True(spent < TimeSpan.FromMilliseconds(1_400), $"one connectTimeout from its call, not one after its drain, {spent.TotalMilliseconds} ms");
+        Assert.Equal(TimeSpan.FromMilliseconds(1_000), clock.GetElapsedTime(began));
 
         // * its DISCONNECT, no will
         Assert.Equal(MqttDisconnectReasonCode.NormalDisconnection, (await link.Next<MqttDisconnectPacket>()).ReasonCode);
