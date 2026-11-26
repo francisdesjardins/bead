@@ -13,11 +13,12 @@
 //   export BEADC_PROTOC="$(node builder/tools/fetch-protoc.mjs)"
 
 import { execFileSync } from 'node:child_process';
-import { createHash } from 'node:crypto';
 import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { inflateRawSync } from 'node:zlib';
+
+import { fetchPinned } from '../../tools/fetch-pinned.mjs';
 
 const BUILDER = fileURLToPath(new URL('../', import.meta.url));
 const PIN = JSON.parse(readFileSync(join(BUILDER, 'protoc.json'), 'utf8'));
@@ -108,16 +109,8 @@ async function main() {
   if (versionOf(executable) !== PIN.version) {
     const archive = `protoc-${PIN.version}-${platform}.zip`;
     const url = `https://github.com/protocolbuffers/protobuf/releases/download/v${PIN.version}/${archive}`;
-    const response = await fetch(url);
-
-    if (!response.ok) throw new Error(`${url}: ${response.status} ${response.statusText}`);
-
-    const bytes = Buffer.from(await response.arrayBuffer());
-    const actual = createHash('sha256').update(bytes).digest('hex');
-
-    // ! nothing of the archive is read before its sha256 is the pin's
-    if (actual !== sha256)
-      throw new Error(`${archive}: sha256 ${actual}, where the pin says ${sha256}`);
+    // ! nothing of the archive is read before its sha256 is the pin's, which fetchPinned holds
+    const bytes = await fetchPinned(url, sha256);
 
     rmSync(target, { force: true, recursive: true });
 

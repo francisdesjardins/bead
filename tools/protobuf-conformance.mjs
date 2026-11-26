@@ -88,6 +88,8 @@ import {
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { fetchPinned } from './fetch-pinned.mjs';
+
 // ── Places ────────────────────────────────────────────────────────────────────
 
 const ROOT = fileURLToPath(new URL('../', import.meta.url));
@@ -1214,19 +1216,8 @@ const fetchRunner = async (pin) => {
     return join(target, 'package');
   }
 
-  const response = await fetch(pin.tarball);
-
-  if (!response.ok) {
-    throw new Error(`${pin.tarball}: ${String(response.status)} ${response.statusText}`);
-  }
-
-  const bytes = Buffer.from(await response.arrayBuffer());
-  const actual = integrityOf(bytes);
-
-  // ! nothing of the tarball is read before its integrity is the pin's
-  if (actual !== pin.integrity) {
-    throw new Error(`${pin.tarball}: ${actual}, where the pin says ${pin.integrity}`);
-  }
+  // ! nothing of the tarball is read before its integrity is the pin's, which fetchPinned holds
+  const bytes = await fetchPinned(pin.tarball, pin.integrity);
 
   rmSync(target, { force: true, recursive: true });
   mkdirSync(target, { recursive: true });

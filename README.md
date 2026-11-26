@@ -1149,6 +1149,10 @@ A clone needs Git 2.56 or newer for the repository's tools. CI's runners meet th
   per worktree and overall. `--min 500M` filters the rows, with K, M, G and T in powers of 1024;
   totals include every ignored folder. Links are not followed; an unreadable path is named and
   its total marked partial. It reads and prints only.
+- `tools/fetch-pinned.mjs`: the download each Node tool of a pinned file makes, through Node's
+  own `fetch`. A network error, a 408, a 429 and a 5xx are tried again, four tries in all, each pause
+  twice the last or the server's `Retry-After`; any other status is refused at once, and the bytes
+  are held to their pin, a sha256 or npm's sha512, before they are returned.
 - `node --test "tools/__tests__/*.test.mjs"`: the root's tools' own tests, in Node's runner, each in
   repositories it makes under the system's temporary folder. Those of `check-a11y.mjs` skip,
   saying why, where the TypeScript side or its Chromium is not installed; `BEAD_A11Y_REQUIRED=1`

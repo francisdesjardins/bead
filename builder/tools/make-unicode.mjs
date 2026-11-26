@@ -30,6 +30,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { fetchPinned } from '../../tools/fetch-pinned.mjs';
+
 const BUILDER = fileURLToPath(new URL('../', import.meta.url));
 const PIN = join(BUILDER, '..', 'spec', 'generators', 'ucd.json');
 const OUTPUT = join(BUILDER, 'src', 'patterns', 'unicode.ts');
@@ -53,14 +55,12 @@ async function ucdText(name) {
   const path = join(cache, name);
 
   if (!existsSync(path)) {
-    const response = await fetch(pinned.url);
+    let data;
 
-    if (!response.ok) throw new Error(`make-unicode: ${pinned.url} answered ${response.status}`);
-
-    const data = Buffer.from(await response.arrayBuffer());
-
-    if (sha256(data) !== pinned.sha256) {
-      throw new Error(`make-unicode: ${pinned.url}: its sha256 is not the one ${PIN} pins`);
+    try {
+      data = await fetchPinned(pinned.url, pinned.sha256);
+    } catch (error) {
+      throw new Error(`make-unicode: ${error.message}`, { cause: error });
     }
 
     mkdirSync(cache, { recursive: true });

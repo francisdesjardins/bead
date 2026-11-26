@@ -51,6 +51,8 @@ import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync 
 import { join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
+import { fetchPinned } from './fetch-pinned.mjs';
+
 // ── Places ────────────────────────────────────────────────────────────────────
 
 const ROOT = fileURLToPath(new URL('../', import.meta.url));
@@ -420,19 +422,8 @@ const fetchOracle = async (pin) => {
       continue;
     }
 
-    const response = await fetch(each.tarball);
-
-    if (!response.ok) {
-      throw new Error(`${each.tarball}: ${String(response.status)} ${response.statusText}`);
-    }
-
-    const bytes = Buffer.from(await response.arrayBuffer());
-    const actual = integrityOf(bytes);
-
-    // ! nothing of a tarball is read before its integrity is the pin's
-    if (actual !== each.integrity) {
-      throw new Error(`${each.tarball}: ${actual}, where the pin says ${each.integrity}`);
-    }
+    // ! nothing of a tarball is read before its integrity is the pin's, which fetchPinned holds
+    const bytes = await fetchPinned(each.tarball, each.integrity);
 
     const unpacked = join(ORACLE, '.unpacked');
 

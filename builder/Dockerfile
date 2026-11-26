@@ -38,6 +38,8 @@ FROM node AS protoc
 WORKDIR /bead/builder
 COPY builder/protoc.json ./
 COPY builder/tools/fetch-protoc.mjs tools/
+# ! at its place beside builder/, as the fetch tools import it by its relative path
+COPY tools/fetch-pinned.mjs /bead/tools/
 RUN node tools/fetch-protoc.mjs && mv ".protoc/$(node -p "require('./protoc.json').version")" /opt/protoc
 
 # protoc-gen-buffa, by its one pin, which writes a Rust output's messages (decision 0051):
@@ -47,6 +49,7 @@ FROM node AS protoc-gen-buffa
 WORKDIR /bead/builder
 COPY builder/protoc-gen-buffa.json ./
 COPY builder/tools/fetch-protoc-gen-buffa.mjs tools/
+COPY tools/fetch-pinned.mjs /bead/tools/
 RUN node tools/fetch-protoc-gen-buffa.mjs \
     && mv ".protoc-gen-buffa/$(node -p "require('./protoc-gen-buffa.json').version")" /opt/protoc-gen-buffa
 

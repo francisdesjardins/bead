@@ -26,6 +26,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `develop`, `main`, a release, a hotfix and a run by hand run every job, and `CI ok` holds each
   job to its scope. `node tools/ci-scope.mjs --local` prints the same jobs' commands before a push,
   and the root's format check moves to the `commits` job, which every change runs.
+- The Node tools that download a pinned file try again on a network error, a 408, a 429 and a 5xx, and
+  hold the bytes to their pin. One module, `tools/fetch-pinned.mjs`, makes each download.
 - CI's TypeScript job runs in parallel: its tests in two shards on each Node line, the DevTools
   extension's tests and the demo's, with the page's accessibility, in legs of their own beside
   them, and the shards' coverage, which c8 reports as one run's, held to the same floor after them.

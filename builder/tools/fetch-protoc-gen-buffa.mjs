@@ -12,10 +12,11 @@
 //   export BEADC_PROTOC_GEN_BUFFA="$(node builder/tools/fetch-protoc-gen-buffa.mjs)"
 
 import { execFileSync } from 'node:child_process';
-import { createHash } from 'node:crypto';
 import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+
+import { fetchPinned } from '../../tools/fetch-pinned.mjs';
 
 const BUILDER = fileURLToPath(new URL('../', import.meta.url));
 const PIN = JSON.parse(readFileSync(join(BUILDER, 'protoc-gen-buffa.json'), 'utf8'));
@@ -60,16 +61,9 @@ async function main() {
   if (versionOf(executable) !== PIN.version) {
     const asset = `protoc-gen-buffa-v${PIN.version}-${platform}${windows ? '.exe' : ''}`;
     const url = `https://github.com/anthropics/buffa/releases/download/v${PIN.version}/${asset}`;
-    const response = await fetch(url);
-
-    if (!response.ok) throw new Error(`${url}: ${response.status} ${response.statusText}`);
-
-    const bytes = Buffer.from(await response.arrayBuffer());
-    const actual = createHash('sha256').update(bytes).digest('hex');
-
-    // ! nothing of the binary is written as an executable, nor run, before its sha256 is the pin's
-    if (actual !== sha256)
-      throw new Error(`${asset}: sha256 ${actual}, where the pin says ${sha256}`);
+    // ! nothing of the binary is written as an executable, nor run, before its sha256 is the pin's,
+    // which fetchPinned holds
+    const bytes = await fetchPinned(url, sha256);
 
     mkdirSync(target, { recursive: true });
     writeFileSync(`${executable}.tmp`, bytes);
