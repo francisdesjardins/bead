@@ -1028,6 +1028,9 @@ against each server.
 
 ## Repository checks
 
+A clone needs Git 2.56 or newer for the repository's tools. CI's runners meet this floor.
+`tools/git-floor.mjs` holds that floor; `flow.mjs` checks it first.
+
 - `node tools/check-commits.mjs <range>`: every commit subject in the range is a Conventional
   Commit; merges are left out. With `--message <file>`, the message git is about to record, which
   must also be UTF-8 without a byte order mark.
@@ -1152,13 +1155,16 @@ checks a clone keeps for itself in `.claude/local/`, when it has them.
 
 A `feature/*` branch is finished by `tools/flow.mjs finish`, from a clone on `develop` or the one
 `--repo` names, each step checked before the next. It holds the branch to being on `origin`,
-`develop` to being clean and at `origin/develop`, a worktree that has the branch checked out to
-being clean, and the branch's head on `origin` to a run of `ci.yml` that passed, awaiting one still
-going. It then merges that head into `develop` with `--no-ff`, git's hooks run, and leaves a
-conflict to whoever resolves it. It pushes `develop` and awaits CI's run of the merge; when a newer
-push cancelled that run, it follows the newest run whose commit contains the merge. On that run's
-success alone, it deletes the branch on `origin`, the worktree, its `node_modules` folders first,
-and the local branch; on its failure, it names the failed jobs and deletes nothing. It never pushes
+`develop` to being clean and at `origin/develop`, with no other worktree holding it, a worktree
+that has the branch checked out to being clean, and the branch's head on `origin` to a run of
+`ci.yml` that passed, awaiting one still going. `git merge-tree --write-tree`
+refuses a conflict without touching the clone's files or index, naming the files and asking to merge
+`develop` into the feature branch, push and let CI pass before finishing again. It then merges that
+head into `develop` with `--no-ff`, git's hooks run. It pushes `develop` and awaits CI's run of the
+merge; when a newer push cancels that run, it follows the newest run whose commit contains the
+merge. On that run's success alone, it deletes the branch on `origin`, the worktree, its
+`node_modules` folders first, and the local branch; on its failure, it names the failed jobs and
+deletes nothing. It never pushes
 `main` or a tag, and refuses a `release/*` or a `hotfix/*` branch, which
 [Releasing](#releasing) finishes. `--dry-run` fetches, makes every check and says what it would do.
 
