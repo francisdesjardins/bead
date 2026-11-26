@@ -3,7 +3,7 @@ export const meta = {
   description:
     'Write or refresh the task-oriented guides under docs/guides/ for teams adopting Bead outside its repository (a C# server, a TypeScript client): the facts gathered with their sources, a project built and run from them outside the repository, the guides written from that project alone, every claim and snippet verified',
   whenToUse:
-    'When the guides are first written, and at each release after bead-release-documents, since a guide states what holds',
+    "When the guides are first written, and at each release after bead-release-documents, since a guide states what holds; once the release's image is on the registry, since a guide pulls beadc's image by the release's tag",
   phases: [
     { title: 'Facts', detail: 'what the sources say, each with its file and line' },
     { title: 'Prove', detail: 'a project built and run outside the repository from the facts' },
