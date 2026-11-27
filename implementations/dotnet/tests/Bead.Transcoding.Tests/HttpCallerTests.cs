@@ -20,6 +20,26 @@ namespace Bead.Transcoding.Tests;
 public sealed partial class HttpCallerTests
 {
     [Fact]
+    public async Task Refuses_a_subscription_credential_with_boundary_whitespace_before_sending()
+    {
+        var sent = 0;
+        using var handler = new StubHandler((_, _) =>
+        {
+            sent += 1;
+            throw new InvalidOperationException("a refused credential reaches no handler");
+        });
+        using var client = new TranscodingHttpClient(new Uri("http://localhost"), new HttpCallerOptions { Handler = handler });
+        foreach (var authorization in new[] { " Bearer good", "Bearer good ", "\tBearer good", "Bearer good\t" })
+        {
+            await using var subscription = client.SubscribeWatch(new Empty(), new HttpCallOptions { Authorization = authorization }).GetAsyncEnumerator(Cancelled);
+            var refused = await Assert.ThrowsAsync<ArgumentException>(async () => { await subscription.MoveNextAsync(); });
+            Assert.StartsWith("a credential holds visible ASCII, spaces and tabs alone, none first or last", refused.Message, StringComparison.Ordinal);
+            Assert.False(await subscription.MoveNextAsync());
+        }
+        Assert.Equal(0, sent);
+    }
+
+    [Fact]
     public void Refuses_a_URL_of_another_scheme_or_with_user_information_a_query_or_a_fragment_and_a_bound_of_0()
     {
         foreach (var url in new[] { "http://user:secret@localhost", "http://localhost?x=1", "http://localhost/#fragment", "ftp://localhost" })
