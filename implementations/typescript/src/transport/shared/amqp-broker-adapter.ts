@@ -154,6 +154,8 @@ interface IReceiving {
   isDeleting: boolean;
   /** A name let go as asked: none handed on or credited after, and its loss no loss. */
   isLeaving: boolean;
+  /** A name attached again, its ATTACH not answered yet: given no credit, and let go at once (spec 15.33). */
+  isReattaching: boolean;
   receiver: Receiver | undefined;
   session: Session | undefined;
   readonly topic: BrokerTopic;
@@ -426,12 +428,15 @@ const assertAuthentication = ({
  * ones waiting in their order; `accepted` is taken, `released` no
  * subscriber, any other outcome refuses it. The end of its connection, of its inbox's session or
  * receiver, is its link lost; a name's receiver its broker ends is attached again once, on a
- * session of its own. Its stop, within its connectTimeout, takes no publication, sends what waits on
- * a sender's credit and awaits each outcome, fails what has not gone by then, deletes its inbox
- * through its broker's management, detaches each receiver, ends each session and closes its
- * connection with no error: once it settled, its broker hands it nothing, a name's queue holding
- * what comes to the name. No link of an id takes another over. Its leg is secure under TLS or to
- * the loopback; it runs in Node alone.
+ * session of its own, within `connectTimeout`, past which its link is lost. While it attaches
+ * again, the name is held: subscribed again, held at once; let go, or stopped, let go at once, its
+ * session ended and its receiver never given credit (spec 15.33). A name's first receiver an
+ * unsubscription met as it attached is given no credit. Its stop, within its connectTimeout, takes
+ * no publication, sends what waits on a sender's credit and awaits each outcome, fails what has not
+ * gone by then, deletes its inbox through its broker's management, detaches each receiver, ends
+ * each session and closes its connection with no error: once it settled, its broker hands it
+ * nothing, a name's queue holding what comes to the name. No link of an id takes another over. Its
+ * leg is secure under TLS or to the loopback; it runs in Node alone.
  *
  * @example
  * const adapter = createAmqpBrokerAdapter({ id: 'server', password, url: 'amqps://broker:5671' });
@@ -605,6 +610,14 @@ export const createAmqpBrokerAdapter = (options: IAmqpBrokerAdapterOptions): IAm
   const endOf = async (incarnation: IIncarnation): Promise<void> => {
     incarnation.isLinked = false;
     incarnation.isUp = false;
+
+    // * each name attached again, given no credit yet, let go at once, its session ended
+    for (const receiving of incarnation.names.values()) {
+      if (receiving.isReattaching) {
+        receiving.isLeaving = true;
+        endSession(receiving.session);
+      }
+    }
 
     const { connection } = incarnation;
     // * one bounded shutdown: what does not come within it is not waited for
@@ -1090,10 +1103,24 @@ export const createAmqpBrokerAdapter = (options: IAmqpBrokerAdapterOptions): IAm
           return;
         }
 
-        // * its inbox's receiver `linkCredit`; a name's 1, so that its queue hands a member one
-        // OPEN at a time, the others waiting there for whichever member reads next (AMQP 1.0
-        // §2.6.7)
-        receiver.add_credit(receiving.topic[1] === 'i' ? linkCredit : 1);
+        // ! an ATTACH answered on a session whose END went, as a name let go as it attached again
+        // ends it: that session still reads but sends nothing, no credit among it (AMQP 1.0
+        // §2.5.5), and its end settles what waits on it
+        if (!session.is_open()) {
+          return;
+        }
+
+        // ! none to a name's first receiver an unsubscription met as it attached, so that its
+        // broker sends it nothing before its DETACH: under at most once, a message sent settled
+        // and not handed on would be lost
+        if (!receiving.isLeaving) {
+          // * its inbox's receiver `linkCredit`; a name's 1, so that its queue hands a member one
+          // OPEN at a time, the others waiting there for whichever member reads next (AMQP 1.0
+          // §2.6.7)
+          receiver.add_credit(receiving.topic[1] === 'i' ? linkCredit : 1);
+        }
+
+        receiving.isReattaching = false;
         isHeld = true;
         resolve();
       });
@@ -1117,7 +1144,8 @@ export const createAmqpBrokerAdapter = (options: IAmqpBrokerAdapterOptions): IAm
 
       endSession(receiving.session);
 
-      if (receiving.isLeaving || incarnation.isRetired) {
+      // ! nor attached again during a stop, which lets each name go
+      if (receiving.isLeaving || incarnation.isRetired || incarnation.stopping !== undefined) {
         return;
       }
 
@@ -1131,14 +1159,45 @@ export const createAmqpBrokerAdapter = (options: IAmqpBrokerAdapterOptions): IAm
       }
 
       incarnation.reattached.add(key);
+      receiving.isReattaching = true;
 
       const session = incarnation.connection.create_session();
+      // * within one connectTimeout, past which its link is lost
+      const timer = platform.setTimeout(
+        () => {
+          if (
+            receiving.isReattaching &&
+            receiving.session === session &&
+            !receiving.isLeaving &&
+            !incarnation.isRetired &&
+            incarnation.stopping === undefined
+          ) {
+            endSession(session);
+            retire(
+              incarnation,
+              new GenericError(
+                `the link of ${id} could not attach the name ${key} again within ${String(connectTimeout)} ms, its connectTimeout`
+              )
+            );
+          }
+        },
+        Math.min(connectTimeout, LONGEST_TIMER)
+      );
+      // its bound cleared as the link ends, which no answer follows
+      const cleared = (): void => {
+        platform.clearTimeout(timer);
+        incarnation.failures.delete(cleared);
+      };
 
+      incarnation.failures.add(cleared);
       session.begin();
       // ! a name let go meanwhile is never attached again: its let-go ended this session, which is
       // no loss
-      attach(incarnation, { onLost: lostName(incarnation, receiving), receiving, session }).catch(
+      attach(incarnation, { onLost: lostName(incarnation, receiving), receiving, session }).then(
+        cleared,
         (reason: unknown) => {
+          cleared();
+
           if (!receiving.isLeaving) {
             retire(
               incarnation,
@@ -1165,6 +1224,7 @@ export const createAmqpBrokerAdapter = (options: IAmqpBrokerAdapterOptions): IAm
       handedOn: 0,
       isDeleting: false,
       isLeaving: false,
+      isReattaching: false,
       receiver: undefined,
       session: undefined,
       topic,
@@ -1301,6 +1361,7 @@ export const createAmqpBrokerAdapter = (options: IAmqpBrokerAdapterOptions): IAm
       handedOn: 0,
       isDeleting: false,
       isLeaving: false,
+      isReattaching: false,
       receiver: undefined,
       session: undefined,
       topic,

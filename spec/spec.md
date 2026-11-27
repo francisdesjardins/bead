@@ -2473,7 +2473,8 @@ bound of its own, what has not gone by then failed, its end settled once its bro
 subscription of its link, as its unsubscription lets one go, a later start a new link; to publish a
 payload to a topic, said taken or refused by its broker; to subscribe a topic, said held by its
 broker, and to let it go, said let go by its broker within a bound of its own, each message its
-broker sent of it before then handed on first; each message it receives, with the topic it came
+broker sent of it before then handed on first, or at once while its adapter attaches it again,
+nothing of it handed on yet (section 15.33); each message it receives, with the topic it came
 to, and its acknowledgement; its link lost, and whether another link of its identity took it over;
 the largest payload a message to a topic carries, its inbox among them; the delivery it gives, at
 least once or at most once; whether its leg is secure.
@@ -2709,9 +2710,16 @@ reconnection tries again. A link is up once its OPEN came and its inbox's receiv
 of its connection that it did not ask, or of its inbox's session or receiver, is its link lost: it
 closes its connection, and its inbox is never attached again in place, since a receiver detached
 hands its unsettled messages back on the same connection. A name's receiver its broker ends is
-attached again once, on a session of its own; that refused, or the name lost again on the same
-link, is its link lost. A sending session that ends refuses each publication it held, its link
-kept, and the next publication begins another. A link of its own, its management's or a sending
+attached again once, on a session of its own, within `connectTimeout`, and never during its
+participant's stop; that refused, not answered within it, or the name lost again on the same link,
+is its link lost. While its receiver is attached again, the name is held: a subscription to it is
+held at once, and its unsubscription, or its participant's stop, lets it go at once, since nothing
+of it was handed on. Its session is then ended whether or not its ATTACH was answered, and its
+receiver is never given credit, an ATTACH answered after that END included: a session that sent
+its END sends nothing more (AMQP 1.0 §2.5.5,
+[end](https://docs.oasis-open.org/amqp/core/v1.0/os/amqp-core-transport-v1.0-os.html#type-end)).
+A sending session that ends refuses each publication it held, its link kept, and the next
+publication begins another. A link of its own, its management's or a sending
 one, whose ATTACH is answered with no terminus of its own, no target to a sender and no source to a
 receiver, is refused, its DETACH to follow, and nothing is sent on it (AMQP 1.0 §2.6.3,
 [attach](https://docs.oasis-open.org/amqp/core/v1.0/os/amqp-core-transport-v1.0-os.html#type-attach)):
@@ -2736,14 +2744,16 @@ there for whichever member reads next, as RabbitMQ's fair dispatch at a prefetch
 ([RabbitMQ 4, consumer prefetch](https://www.rabbitmq.com/docs/consumer-prefetch)). A subscription
 is held once its ATTACH named its source, and refused when its ATTACH names none and a DETACH
 follows it, or when its broker ends its session: a name its broker's access control denies ends
-that name's session alone. A subscription asked again while it is under way waits for it. A name
-is let go once each message its receiver handed on was settled and then its DETACH came, none
-handed on after it is asked, all within one `connectTimeout`, past which its link is lost: a
-message detached unsettled goes back to its queue, and an OPEN whose connection its server took and
-has since closed would be answered anew, its pair gone. A name whose subscription is under way as it
-is let go is never held, and is let go once its ATTACH is answered. An inbox is let go once its
-broker's management deleted it, answered within `connectTimeout`, what comes to it meanwhile handed
-on and credited.
+that name's session alone. A subscription asked again while it is under way waits for it, and one
+asked while its receiver is attached again is held at once (section 15.33). A name is let go once
+each message its receiver handed on was settled and then its DETACH came, none handed on after it
+is asked, all within one `connectTimeout`, past which its link is lost: a message detached
+unsettled goes back to its queue, and an OPEN whose connection its server took and has since closed
+would be answered anew, its pair gone. A name whose receiver is attached again is let go at once
+(section 15.33). A name whose subscription is under way as it is let go is never held, and is let
+go once its ATTACH is answered, its receiver given no credit, so that its broker sends it nothing
+before its DETACH. An inbox is let go once its broker's management deleted it, answered within
+`connectTimeout`, what comes to it meanwhile handed on and credited.
 
 15.35. A participant publishes each parcel as one message of format 0, unsettled where its adapter
 delivers at least once and settled where at most once, within its sender's credit, later ones
@@ -2774,12 +2784,12 @@ payload of a message to that topic within its own `maximumMessageSize`. Under it
 `bead.i.server` takes a payload of 16,777,156 bytes; under a max-message-size of 4,096, a message to
 `bead.i.peer` carries 4,038.
 
-| Bound                | By default | Bounds                                                                                                                                                                                                                                      |
-| -------------------- | ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `maximumMessageSize` | 16,777,216 | the largest message, as its publisher writes it, whose payload it takes, 1 to 4,294,967,295 bytes: its receive bound                                                                                                                        |
-| `linkCredit`         | 1,000      | the messages its broker may deliver its inbox's receiver before it settles one, 1 to 2,147,483,647                                                                                                                                          |
-| `idleTimeout`        | 30 s       | its OPEN's idle-time-out, 1 ms to 1,073,741,823 ms: it counts its link lost silent for twice it                                                                                                                                             |
-| `connectTimeout`     | 30 s       | how long its start waits for its password, where it asks its provider, its broker's OPEN, its sessions and its inbox; its inbox's deletion, for its answer; a name let go, for what it handed on to be settled and its DETACH; and its stop |
+| Bound                | By default | Bounds                                                                                                                                                                                                                                                                                      |
+| -------------------- | ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `maximumMessageSize` | 16,777,216 | the largest message, as its publisher writes it, whose payload it takes, 1 to 4,294,967,295 bytes: its receive bound                                                                                                                                                                        |
+| `linkCredit`         | 1,000      | the messages its broker may deliver its inbox's receiver before it settles one, 1 to 2,147,483,647                                                                                                                                                                                          |
+| `idleTimeout`        | 30 s       | its OPEN's idle-time-out, 1 ms to 1,073,741,823 ms: it counts its link lost silent for twice it                                                                                                                                                                                             |
+| `connectTimeout`     | 30 s       | how long its start waits for its password, where it asks its provider, its broker's OPEN, its sessions and its inbox; its inbox's deletion, for its answer; a name let go, for what it handed on to be settled and its DETACH; a name attached again, for its ATTACH's answer; and its stop |
 
 None of them is ever without end or 0. A Data section's payload is a `vbin32` of 4,294,967,295 bytes
 at most ([AMQP 1.0 §1.6.19](https://docs.oasis-open.org/amqp/core/v1.0/os/amqp-core-types-v1.0-os.html#type-binary)),

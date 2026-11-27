@@ -121,6 +121,21 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   later than the acknowledgements read after it, so a group member that stopped could see its name
   let go before an OPEN that came first. It then refused that OPEN 503 once its link was stopping,
   the REFUSE never went, and the client waited out its connect.
+- The C# AMQP 1.0 adapter holds a name while it attaches the name's receiver again, after its
+  broker ended it. A subscription meanwhile is held at once, with no second receiver. An
+  unsubscription or a stop meanwhile lets the name go at once and ends that receiver's session,
+  which gets no credit, even when its ATTACH is answered later. Once that receiver has its credit,
+  an unsubscription waits for what it handed on to be settled. A name whose receiver its broker
+  ended just as it attached is held by that reattach alone, so the next unsubscription lets it go.
+  A second receiver took credit and outlived the let-go, an unsubscription could settle while a
+  message was on its way to its participant, and a stop let the reattach take credit.
+- The TypeScript AMQP 1.0 adapter gives up attaching a name's receiver again past
+  `connectTimeout`, its link lost, and attaches none again during a stop. Its stop ends at once the
+  session of a receiver it attaches again. It gives no credit to a receiver whose session it ended:
+  it sent a FLOW after that session's END, which AMQP 1.0 §2.5.5 forbids.
+- On the TypeScript and C# sides, an AMQP 1.0 adapter gives a name's first receiver no credit when
+  an unsubscription met it as it attached. Its broker could send it messages before its DETACH, and
+  under at most once such a message was lost.
 
 ## [0.17.0] - 2026-11-24
 
