@@ -10,6 +10,9 @@
     "url": "git+https://github.com/francisdesjardins/bead.git",
     "directory": "implementations/typescript"
   },
+  "files": [
+    "dist"
+  ],
   "type": "module",
   "exports": {
     "./amqp-broker-adapter": "./src/transport/shared/amqp-broker-adapter.ts",
@@ -48,6 +51,147 @@
     "./worker-transport-server": "./src/transport/server/worker-transport-server.ts",
     "./package.json": "./package.json"
   },
+  "publishConfig": {
+    "exports": {
+      "./amqp-broker-adapter": {
+        "types": "./dist/transport/shared/amqp-broker-adapter.d.ts",
+        "default": "./dist/transport/shared/amqp-broker-adapter.js"
+      },
+      "./broker-participant": {
+        "types": "./dist/transport/shared/broker-participant.d.ts",
+        "default": "./dist/transport/shared/broker-participant.js"
+      },
+      "./broker-transport-client": {
+        "types": "./dist/transport/client/broker-transport-client.d.ts",
+        "default": "./dist/transport/client/broker-transport-client.js"
+      },
+      "./broker-transport-server": {
+        "types": "./dist/transport/server/broker-transport-server.d.ts",
+        "default": "./dist/transport/server/broker-transport-server.js"
+      },
+      "./client": {
+        "types": "./dist/client/client.d.ts",
+        "default": "./dist/client/client.js"
+      },
+      "./http-client": {
+        "types": "./dist/client/http-client.d.ts",
+        "default": "./dist/client/http-client.js"
+      },
+      "./http-gateway": {
+        "types": "./dist/transcoding/http-gateway.d.ts",
+        "default": "./dist/transcoding/http-gateway.js"
+      },
+      "./http-server": {
+        "types": "./dist/server/http-server.d.ts",
+        "default": "./dist/server/http-server.js"
+      },
+      "./http-transport-client": {
+        "types": "./dist/transport/client/http-transport-client.d.ts",
+        "default": "./dist/transport/client/http-transport-client.js"
+      },
+      "./http-transport-server": {
+        "types": "./dist/transport/server/http-transport-server.d.ts",
+        "default": "./dist/transport/server/http-transport-server.js"
+      },
+      "./joined-transport-server": {
+        "types": "./dist/transport/server/joined-transport-server.d.ts",
+        "default": "./dist/transport/server/joined-transport-server.js"
+      },
+      "./memory-broker": {
+        "types": "./dist/transport/shared/memory-broker.d.ts",
+        "default": "./dist/transport/shared/memory-broker.js"
+      },
+      "./memory-transport-client": {
+        "types": "./dist/transport/client/memory-transport-client.d.ts",
+        "default": "./dist/transport/client/memory-transport-client.js"
+      },
+      "./memory-transport-server": {
+        "types": "./dist/transport/server/memory-transport-server.d.ts",
+        "default": "./dist/transport/server/memory-transport-server.js"
+      },
+      "./mqtt-broker-adapter": {
+        "types": "./dist/transport/shared/mqtt-broker-adapter.d.ts",
+        "default": "./dist/transport/shared/mqtt-broker-adapter.js"
+      },
+      "./notification-manager": {
+        "types": "./dist/router/server/notification-manager.d.ts",
+        "default": "./dist/router/server/notification-manager.js"
+      },
+      "./proto": {
+        "types": "./dist/proto/proto.d.ts",
+        "default": "./dist/proto/proto.js"
+      },
+      "./router-client": {
+        "types": "./dist/router/client/router-client.d.ts",
+        "default": "./dist/router/client/router-client.js"
+      },
+      "./router-server": {
+        "types": "./dist/router/server/router-server.d.ts",
+        "default": "./dist/router/server/router-server.js"
+      },
+      "./service": {
+        "types": "./dist/service/service.d.ts",
+        "default": "./dist/service/service.js"
+      },
+      "./service-manager": {
+        "types": "./dist/router/shared/service-manager.d.ts",
+        "default": "./dist/router/shared/service-manager.js"
+      },
+      "./session-manager": {
+        "types": "./dist/router/server/session-manager.d.ts",
+        "default": "./dist/router/server/session-manager.js"
+      },
+      "./server": {
+        "types": "./dist/server/server.d.ts",
+        "default": "./dist/server/server.js"
+      },
+      "./transcoding": {
+        "types": "./dist/transcoding/transcoding.d.ts",
+        "default": "./dist/transcoding/transcoding.js"
+      },
+      "./transport-client": {
+        "types": "./dist/transport/client/transport-client.d.ts",
+        "default": "./dist/transport/client/transport-client.js"
+      },
+      "./transport-server": {
+        "types": "./dist/transport/server/transport-server.d.ts",
+        "default": "./dist/transport/server/transport-server.js"
+      },
+      "./websocket-client": {
+        "types": "./dist/client/websocket-client.d.ts",
+        "default": "./dist/client/websocket-client.js"
+      },
+      "./websocket-server": {
+        "types": "./dist/server/websocket-server.d.ts",
+        "default": "./dist/server/websocket-server.js"
+      },
+      "./websocket-transport-client": {
+        "types": "./dist/transport/client/websocket-transport-client.d.ts",
+        "default": "./dist/transport/client/websocket-transport-client.js"
+      },
+      "./websocket-transport-server": {
+        "types": "./dist/transport/server/websocket-transport-server.d.ts",
+        "default": "./dist/transport/server/websocket-transport-server.js"
+      },
+      "./worker-client": {
+        "types": "./dist/client/worker-client.d.ts",
+        "default": "./dist/client/worker-client.js"
+      },
+      "./worker-server": {
+        "types": "./dist/server/worker-server.d.ts",
+        "default": "./dist/server/worker-server.js"
+      },
+      "./worker-transport-client": {
+        "types": "./dist/transport/client/worker-transport-client.d.ts",
+        "default": "./dist/transport/client/worker-transport-client.js"
+      },
+      "./worker-transport-server": {
+        "types": "./dist/transport/server/worker-transport-server.d.ts",
+        "default": "./dist/transport/server/worker-transport-server.js"
+      },
+      "./package.json": "./package.json"
+    }
+  },
   "scripts": {
     "comment-budget": "node tools/check-comment-budget.mjs",
     "demo": "node demo/serve.ts",
@@ -77,7 +221,8 @@
     "surface:check": "node tools/check-surface.mjs && node tools/check-surface.mjs --cases",
     "surface:write": "node tools/check-surface.mjs --write",
     "validations:check": "node ../../tools/check-validations.mjs typescript",
-    "validations:generate": "node ../../tools/check-validations.mjs typescript --write"
+    "validations:generate": "node ../../tools/check-validations.mjs typescript --write",
+    "prepack": "node ../../tools/pack-typescript.mjs"
   },
   "devDependencies": {
     "@axe-core/playwright": "4.14.0",
@@ -113,7 +258,8 @@
     "@bufbuild/protobuf": "^2.17.0",
     "mqtt": "^5.16.1",
     "rhea": "^3.0.5",
-    "undici": "^8"
+    "undici": "^8",
+    "ws": "^8.23.0"
   },
   "peerDependenciesMeta": {
     "@bufbuild/protobuf": {
@@ -126,6 +272,9 @@
       "optional": true
     },
     "undici": {
+      "optional": true
+    },
+    "ws": {
       "optional": true
     }
   },

@@ -1,0 +1,115 @@
+name: Packages
+
+# The libraries are release attachments. beadc's registry image has its own workflow (0055).
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'The release tag; run this workflow on that same tag'
+        required: true
+        type: string
+
+concurrency:
+  group: packages-${{ inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  packages:
+    name: The libraries, attested and attached
+    runs-on: ubuntu-26.04
+    timeout-minutes: 20
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    env:
+      TAG: ${{ inputs.tag || github.ref_name }}
+      GH_REPO: ${{ github.repository }}
+      PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '1'
+    steps:
+      # ! the input reaches the shell through the environment, and the run must be on that tag:
+      # the provenance then names the source tag as well as its commit
+      - name: A version tag, the ref the run is on
+        run: |
+          if ! [[ "$TAG" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]] || [ "$GITHUB_REF" != "refs/tags/$TAG" ]; then
+            echo '::error title=packages::run packages.yml on its tag input, vX.Y.Z'
+            exit 1
+          fi
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: The tag's commit, on main, with the tag's version
+        run: |
+          test "$(git rev-parse "refs/tags/$TAG^{commit}")" = "$GITHUB_SHA"
+          git merge-base --is-ancestor "$GITHUB_SHA" origin/main
+          test "v$(jq -r .version implementations/typescript/package.json)" = "$TAG"
+          version="$(sed -n 's/.*<Version>\([^<]*\)<\/Version>.*/\1/p' implementations/dotnet/Directory.Build.props)"
+          test "v$version" = "$TAG"
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '26'
+      - uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
+        with:
+          global-json-file: implementations/dotnet/global.json
+      - name: The TypeScript tarball
+        working-directory: implementations/typescript
+        run: |
+          mkdir -p "$RUNNER_TEMP/packages"
+          node .yarn/releases/yarn-4.18.1.cjs install --immutable
+          node .yarn/releases/yarn-4.18.1.cjs pack --out "$RUNNER_TEMP/packages/francisdesjardins-bead-${TAG#v}.tgz"
+      - name: Every packable C# project
+        working-directory: implementations/dotnet
+        run: dotnet pack Bead.slnx -c Release --output "$RUNNER_TEMP/packages" -p:RestoreLockedMode=true
+      - name: Each archive's version, then the SHA-256 sums
+        run: |
+          test "$(tar -xOf "$RUNNER_TEMP/packages/francisdesjardins-bead-${TAG#v}.tgz" package/package.json | jq -r .version)" = "${TAG#v}"
+          python3 - <<'PY'
+          import os
+          from pathlib import Path
+          from xml.etree import ElementTree as ET
+          from zipfile import ZipFile
+
+          packages = sorted((Path(os.environ['RUNNER_TEMP']) / 'packages').glob('*.nupkg'))
+          if not packages:
+              raise SystemExit('no C# packages')
+          for package in packages:
+              with ZipFile(package) as archive:
+                  names = [name for name in archive.namelist() if name.endswith('.nuspec')]
+                  if len(names) != 1:
+                      raise SystemExit(f'{package.name}: one nuspec is due')
+                  metadata = ET.fromstring(archive.read(names[0]))
+                  version = metadata.find('.//{*}metadata/{*}version').text
+                  if version != os.environ['TAG'][1:]:
+                      raise SystemExit(f'{package.name}: version {version} differs from the tag')
+                  print(f'{package.name}: {version}')
+          PY
+          cd "$RUNNER_TEMP/packages"
+          sha256sum -- *.tgz *.nupkg > SHA256SUMS
+          sha256sum --check SHA256SUMS
+      - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: ${{ runner.temp }}/packages/*
+          create-storage-record: false
+      - name: The GitHub Release and its attachments
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if ! gh api "repos/$GH_REPO/releases/tags/$TAG" > "$RUNNER_TEMP/release.json" 2> "$RUNNER_TEMP/release-error"; then
+            if ! grep -q '(HTTP 404)' "$RUNNER_TEMP/release-error"; then
+              cat "$RUNNER_TEMP/release-error" >&2
+              exit 1
+            fi
+            gh release create "$TAG" --verify-tag --title "$TAG" --generate-notes
+          fi
+          gh release upload "$TAG" "$RUNNER_TEMP/packages/"* --clobber
