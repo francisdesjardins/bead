@@ -513,7 +513,7 @@ that a test of each side does:
   `grants a name’s receiver a credit of 1, so that of the OPENs its broker holds for a member with room for one it hands on one, the others left in the name’s queue, none refused (spec 15.34)`,
   `lets a name go once its DETACH came, and its inbox once management deleted it, telling no loss (spec 15.34)`,
   `lets a name go within one connectTimeout, what it handed on settled and its DETACH answered, and tells its link lost past it (spec 15.34, 15.37)`,
-  `waits, subscribing a name under way, for its ATTACH to name its source, and lets a name whose subscription an unsubscription met go once it attached, never held (spec 15.34)`,
+  `waits, subscribing a name under way, for its ATTACH to name its source, and lets a name whose subscription an unsubscription met go once it attached, given no credit and never held (spec 15.34)`,
   `hands on and credits what comes to its inbox while its deletion is under way, and keeps its inbox where its deletion is refused or not answered within connectTimeout (spec 15.34, 15.37)`,
   `publishes each parcel as one message of format 0 to the anonymous terminus, unsettled, its to the topic’s exchange address, a life its header’s ttl in milliseconds rounded up where one is asked, and nothing else (spec 15.35)`,
   `holds its publications to its sender’s credit, the next going as credit comes, in their order, and delays no receiver for them (spec 15.35)`,
