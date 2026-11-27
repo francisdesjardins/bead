@@ -313,6 +313,7 @@ __metadata:
     mqtt: ^5.16.1
     rhea: ^3.0.5
     undici: ^8
+    ws: ^8.23.0
   dependenciesMeta:
     "@bufbuild/buf":
       built: true
@@ -326,6 +327,8 @@ __metadata:
     rhea:
       optional: true
     undici:
+      optional: true
+    ws:
       optional: true
   languageName: node
   linkType: soft
