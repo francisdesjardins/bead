@@ -268,22 +268,22 @@ fn judge(declared: &ItemStruct, implemented: Option<&Implemented>) -> Vec<Findin
     names.sort_unstable();
 
     // a constructor of the required members: their names, and nothing else
-    let constructors: Vec<&Constructor> = implemented
-        .filter(|_| !plain.is_empty())
-        .map(|implemented| {
-            implemented
-                .constructors
-                .iter()
-                .filter(|constructor| {
-                    let mut taken: Vec<&str> =
-                        constructor.parameters.iter().map(String::as_str).collect();
+    let constructors: Vec<&Constructor> =
+        implemented
+            .filter(|_| !plain.is_empty())
+            .map_or_default(|implemented| {
+                implemented
+                    .constructors
+                    .iter()
+                    .filter(|constructor| {
+                        let mut taken: Vec<&str> =
+                            constructor.parameters.iter().map(String::as_str).collect();
 
-                    taken.sort_unstable();
-                    taken == names
-                })
-                .collect()
-        })
-        .unwrap_or_default();
+                        taken.sort_unstable();
+                        taken == names
+                    })
+                    .collect()
+            });
     let is_constructed = !constructors.is_empty();
 
     for constructor in constructors

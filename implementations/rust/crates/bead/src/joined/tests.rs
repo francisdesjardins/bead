@@ -394,9 +394,7 @@ impl ServerListener for Telling {
     }
 
     fn on_error(&self, error: &RouterError, connection_handle: Option<&ConnectionHandle>) {
-        let handle = connection_handle
-            .map(ToString::to_string)
-            .unwrap_or_default();
+        let handle = connection_handle.map_or_default(ToString::to_string);
 
         locked(&self.told).push(format!("error {error} {handle}"));
     }

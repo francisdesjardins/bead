@@ -280,9 +280,9 @@ fn network_of(entry: &str) -> Result<Network, ProgrammerError> {
     if bits & past != 0 {
         let kept = bits & !past;
         let written = match address {
-            Address::V4(_) => u32::try_from(kept)
-                .map(|bits| Ipv4Addr::from_bits(bits).to_string())
-                .unwrap_or_default(),
+            Address::V4(_) => {
+                u32::try_from(kept).map_or_default(|bits| Ipv4Addr::from_bits(bits).to_string())
+            }
             Address::V6(_) => ipv6_text_of(kept),
         };
 

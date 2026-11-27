@@ -429,8 +429,7 @@ impl NotificationManager {
         let calls: Vec<u32> = self
             .targets
             .get(handle)
-            .map(|calls| calls.keys().copied().collect())
-            .unwrap_or_default();
+            .map_or_default(|calls| calls.keys().copied().collect());
 
         for call_id in calls {
             self.remove((handle, call_id));

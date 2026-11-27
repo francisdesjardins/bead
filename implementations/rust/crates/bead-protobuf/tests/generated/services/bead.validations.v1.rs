@@ -4111,11 +4111,7 @@ fn rules_of_oneofs_x(message: &super::super::super::super::messages::bead::valid
 fn rules_of_oneofs_oneof_0(message: &super::super::super::super::messages::bead::validations::v1::Oneofs, sink: &mut dyn ::bead_protobuf::ViolationSink) -> bool {
     let set = [!message.x.is_empty(), !message.y.is_empty()].into_iter().filter(|set| *set).count();
 
-    if set > 1 && sink.add(&ONEOFS_ONEOF_0, ::bead_protobuf::RuleValue::Absent) {
-        return true;
-    }
-
-    false
+    set > 1 && sink.add(&ONEOFS_ONEOF_0, ::bead_protobuf::RuleValue::Absent)
 }
 
 // (buf.validate.message).oneof 1
@@ -4267,11 +4263,7 @@ fn rules_of_pair_label(message: &super::super::super::super::messages::bead::val
 fn rules_of_pair_oneof_0(message: &super::super::super::super::messages::bead::validations::v1::Pair, sink: &mut dyn ::bead_protobuf::ViolationSink) -> bool {
     let set = [message.left.is_some(), message.right.is_some()].into_iter().filter(|set| *set).count();
 
-    if set > 1 && sink.add(&PAIR_ONEOF_0, ::bead_protobuf::RuleValue::Absent) {
-        return true;
-    }
-
-    false
+    set > 1 && sink.add(&PAIR_ONEOF_0, ::bead_protobuf::RuleValue::Absent)
 }
 
 const ORDER_EARLY_INT32_GT: ::bead_protobuf::ViolationRule = ::bead_protobuf::ViolationRule {

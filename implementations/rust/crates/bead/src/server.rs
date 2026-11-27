@@ -777,8 +777,7 @@ impl SessionManager {
                     state
                         .facade
                         .as_ref()
-                        .map(|facade| facade.sessions.all())
-                        .unwrap_or_default()
+                        .map_or_default(|facade| facade.sessions.all())
                 },
                 Vec::new(),
             ),
@@ -794,8 +793,7 @@ impl SessionManager {
                     state
                         .facade
                         .as_ref()
-                        .map(|facade| facade.sessions.connection_handles())
-                        .unwrap_or_default()
+                        .map_or_default(|facade| facade.sessions.connection_handles())
                 },
                 Vec::new(),
             ),

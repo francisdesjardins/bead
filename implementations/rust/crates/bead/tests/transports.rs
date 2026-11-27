@@ -1190,8 +1190,7 @@ async fn case_of((case, wall): (&Value, SystemTime)) -> Result<Case, String> {
     let wills = if options.get("wills") == Some(&Value::Bool(true)) {
         case.get("steps")
             .and_then(Value::as_array)
-            .map(|steps| wills_of(steps))
-            .unwrap_or_default()
+            .map_or_default(|steps| wills_of(steps))
     } else {
         HashMap::new()
     };
@@ -1643,14 +1642,13 @@ async fn play_steps(case: &mut Case, steps: &[Value]) -> Result<(), String> {
             let openers: Vec<String> = placed
                 .get("openers")
                 .and_then(Value::as_array)
-                .map(|openers| {
+                .map_or_default(|openers| {
                     openers
                         .iter()
                         .filter_map(Value::as_str)
                         .map(str::to_owned)
                         .collect()
-                })
-                .unwrap_or_default();
+                });
             let places = placed_of(case, (on, &openers, within)).await?;
 
             hold(places.iter().all(|places| places.len() == 1), || {
@@ -1788,14 +1786,11 @@ async fn play_steps(case: &mut Case, steps: &[Value]) -> Result<(), String> {
 
 // the keys of `case` no player reads, which fail it
 fn read_case_keys(case: &Value) -> Result<(), String> {
-    let keys: Vec<&String> = case
-        .as_object()
-        .map(|case| {
-            case.keys()
-                .filter(|key| !CASE_KEYS.contains(&key.as_str()))
-                .collect()
-        })
-        .unwrap_or_default();
+    let keys: Vec<&String> = case.as_object().map_or_default(|case| {
+        case.keys()
+            .filter(|key| !CASE_KEYS.contains(&key.as_str()))
+            .collect()
+    });
 
     hold(keys.is_empty(), || {
         format!("the keys of the case this player does not read: {keys:?}")
