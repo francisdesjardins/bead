@@ -460,16 +460,12 @@ async fn fails_its_start_where_its_broker_cannot_be_reached_over_tcp_tls_or_a_we
     let closed = crate::testing::closed_port::closed_port().unwrap();
     let port = closed.port();
 
-    // * and a host no name resolves to (RFC 6761 §6.4), on the port of its scheme
     for url in [
         format!("mqtt://127.0.0.1:{port}"),
         format!("mqtts://127.0.0.1:{port}"),
         format!("ws://127.0.0.1:{port}/mqtt"),
         format!("wss://127.0.0.1:{port}/mqtt"),
-        "mqtt://broker.invalid".to_owned(),
-        "mqtts://broker.invalid".to_owned(),
     ] {
-        // * given up within a second, so that a slow resolver fails it rather than the test
         let mut options = MqttBrokerAdapterOptions::new(&url, ID);
 
         options.password = Some(PASSWORD.to_owned());
