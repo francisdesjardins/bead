@@ -24,28 +24,50 @@ const LIFE_BYTES = 13;
 // the longest address the profile's count holds: its str8 and its properties' list8 always fit
 const LONGEST_ADDRESS = 207;
 
-// the described types of the sections the profile writes (AMQP 1.0 Messaging §3.2.1, §3.2.4, §3.2.6)
-const SECTION = Object.freeze({ DATA: 0x75, HEADER: 0x70, PROPERTIES: 0x73 });
+/**
+ * The described types of the sections the profile writes (AMQP 1.0 Messaging §3.2.1, §3.2.4,
+ * §3.2.6).
+ */
+export const SECTION = Object.freeze({ DATA: 0x75, HEADER: 0x70, PROPERTIES: 0x73 });
 
-// the encodings it writes (AMQP 1.0 Types §1.6)
+/** AMQP 1.0 Types §1.6: the encodings the profile writes, each by its constructor's name. */
 const CODE = Object.freeze({
   LIST8: 0xc0,
   NULL: 0x40,
-  SMALL_UINT: 0x52,
-  STR8: 0xa1,
+  SMALLUINT: 0x52,
+  SMALLULONG: 0x53,
+  STR8_UTF8: 0xa1,
   UINT: 0x70,
   UINT0: 0x43,
   VBIN32: 0xb0,
   VBIN8: 0xa0,
 });
 
+/** AMQP 1.0 Types §1.2, Figure 1.3: the constructor of a described type, its descriptor after it. */
+const DESCRIBED = 0x00;
+
+/** AMQP 1.0 Types §1.6: the largest uint a smalluint holds, in its one octet. */
+const LARGEST_SMALLUINT = 255;
+
+/** AMQP 1.0 Types §1.6: the longest binary a vbin8 holds, its length one octet. */
+const LONGEST_VBIN8 = 255;
+
 const encoder = new TextEncoder();
 
 // helpers
 
-// a described type of a small-ulong descriptor: 0x00, 0x53 and its code (AMQP 1.0 Types §1.2)
+// a described type of a smallulong descriptor: its constructor, then its code (AMQP 1.0 Types §1.2)
 const descriptorOf = (code: number): number[] => {
-  return [0x00, 0x53, code];
+  return [DESCRIBED, CODE.SMALLULONG, code];
+};
+
+// four octets of a uint, in network byte order, as AMQP writes every fixed width (Types §1.6)
+const fourOctetsOf = (value: number): number[] => {
+  const bytes = new Uint8Array(4);
+
+  new DataView(bytes.buffer).setUint32(0, value);
+
+  return [...bytes];
 };
 
 // a uint in the smallest of its encodings: uint0, smalluint or uint
@@ -54,17 +76,11 @@ const uintOf = (value: number): number[] => {
     return [CODE.UINT0];
   }
 
-  if (value <= 0xff) {
-    return [CODE.SMALL_UINT, value];
+  if (value <= LARGEST_SMALLUINT) {
+    return [CODE.SMALLUINT, value];
   }
 
-  return [
-    CODE.UINT,
-    (value >>> 24) & 0xff,
-    (value >>> 16) & 0xff,
-    (value >>> 8) & 0xff,
-    value & 0xff,
-  ];
+  return [CODE.UINT, ...fourOctetsOf(value)];
 };
 
 // a list8 of three fields, two nulls then the last set, as each section of the profile is
@@ -97,7 +113,7 @@ export const queueAddressOf = (topic: BrokerTopic): string => {
  * otherwise.
  */
 export const widthOf = (payload: number): number => {
-  return payload < 256 ? 2 : 5;
+  return payload <= LONGEST_VBIN8 ? 2 : 5;
 };
 
 /**
@@ -138,20 +154,12 @@ export const encodeMessage = (
   const header = ttl === undefined ? [] : [...descriptorOf(SECTION.HEADER), ...listOf(uintOf(ttl))];
   const properties = [
     ...descriptorOf(SECTION.PROPERTIES),
-    ...listOf([CODE.STR8, address.length, ...address]),
+    ...listOf([CODE.STR8_UTF8, address.length, ...address]),
   ];
   const length = payload.length;
   const data = [
     ...descriptorOf(SECTION.DATA),
-    ...(length < 256
-      ? [CODE.VBIN8, length]
-      : [
-          CODE.VBIN32,
-          (length >>> 24) & 0xff,
-          (length >>> 16) & 0xff,
-          (length >>> 8) & 0xff,
-          length & 0xff,
-        ]),
+    ...(length <= LONGEST_VBIN8 ? [CODE.VBIN8, length] : [CODE.VBIN32, ...fourOctetsOf(length)]),
   ];
   const bytes = new Uint8Array(header.length + properties.length + data.length + length);
 

@@ -8,6 +8,12 @@ import {
   ACKNOWLEDGEMENT_VERDICTS,
   type AcknowledgementType,
   acknowledgementVerdictOf,
+  CONTINUATION_BIT,
+  DIGIT_MASK,
+  DIGIT_RADIX,
+  LONGEST_VARIABLE_BYTE_INTEGER,
+  PACKET_TYPE_SHIFT,
+  UNSPECIFIED_ERROR,
 } from './mqtt-packets';
 
 // interfaces
@@ -65,30 +71,18 @@ type Said =
 
 // constants
 
-// a Variable Byte Integer's digits, seven bits each, low first, under a continuation bit (§1.5.5)
-const CONTINUES = 0x80;
-const DIGIT = 0x7f;
-const RADIX = 128;
-const LONGEST_LENGTH = 4;
-
-// a packet's type, the high half of its first byte (MQTT 5.0 §2.1.2)
-const TYPE_SHIFT = 4;
-
 // a Packet Identifier, a Two Byte Integer
 const IDENTIFIER_BYTES = 2;
 const BYTE = 256;
-
-// what a refusal its table does not name is handed on as: the code every table names (§2.4)
-const UNSPECIFIED_ERROR = 0x80;
 
 const MORE: Said = Object.freeze({ kind: 'more' });
 const JUDGED: Said = Object.freeze({ kind: 'judged' });
 const UNJUDGED: Said = Object.freeze({ kind: 'unjudged' });
 
 const NAMES: Readonly<Record<AcknowledgementType, string>> = Object.freeze({
-  4: 'a PUBACK',
-  9: 'a SUBACK',
-  11: 'an UNSUBACK',
+  [ACKNOWLEDGEMENT_TYPES.PUBACK]: 'a PUBACK',
+  [ACKNOWLEDGEMENT_TYPES.SUBACK]: 'a SUBACK',
+  [ACKNOWLEDGEMENT_TYPES.UNSUBACK]: 'an UNSUBACK',
 });
 
 // helpers
@@ -124,17 +118,17 @@ const bodyOf = (type: AcknowledgementType, length: number): IAcknowledgementBody
 
 // a SUBACK's or an UNSUBACK's Property Length, digit by digit: its count of codes judged as it ends
 const propertyDigitOf = (judged: IAcknowledgementBody, digit: number): Said => {
-  judged.propertyLength += (digit & DIGIT) * RADIX ** judged.propertyDigits;
+  judged.propertyLength += (digit & DIGIT_MASK) * DIGIT_RADIX ** judged.propertyDigits;
   judged.propertyDigits += 1;
 
-  if ((digit & CONTINUES) !== 0) {
+  if ((digit & CONTINUATION_BIT) !== 0) {
     // ! one still continuing at its body's last byte leaves no room for a code, and mqtt-packet,
     // given no byte after it, reads it as granting nothing; a fifth digit is the library's to refuse
     if (judged.offset === judged.length) {
       return trippedBy(countOf(judged.type, 0));
     }
 
-    return judged.propertyDigits === LONGEST_LENGTH ? UNJUDGED : MORE;
+    return judged.propertyDigits === LONGEST_VARIABLE_BYTE_INTEGER ? UNJUDGED : MORE;
   }
 
   const count = judged.length - judged.offset - judged.propertyLength;
@@ -320,19 +314,19 @@ export const guardPackets = (stream: IGuardedStream, options: IPacketGuardOption
         const digit = chunk[at] ?? 0;
 
         at += 1;
-        length += (digit & DIGIT) * RADIX ** (header - 1);
+        length += (digit & DIGIT_MASK) * DIGIT_RADIX ** (header - 1);
         header += 1;
 
-        if ((digit & CONTINUES) !== 0) {
+        if ((digit & CONTINUATION_BIT) !== 0) {
           // its first byte, then its digits
-          if (header - 1 === LONGEST_LENGTH) {
+          if (header - 1 === LONGEST_VARIABLE_BYTE_INTEGER) {
             isJudging = false;
 
             return push(chunk, encoding);
           }
         } else {
           const size = header + length;
-          const type = first >> TYPE_SHIFT;
+          const type = first >> PACKET_TYPE_SHIFT;
 
           header = 0;
 

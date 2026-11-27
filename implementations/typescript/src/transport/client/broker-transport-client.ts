@@ -398,7 +398,7 @@ export const createBrokerTransportClient = (
           const connection = drop()?.connection;
 
           if (isClean) {
-            connection?.close(CloseCode.NORMAL);
+            connection?.close(CloseCode.NORMAL_CLOSURE);
           } else {
             connection?.reset();
           }

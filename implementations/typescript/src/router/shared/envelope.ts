@@ -6,6 +6,16 @@ import { EnvelopeKind, FailureScope, LIMIT_DEFAULTS } from './constants';
 import { byteCountOf } from '../../transport/shared/errors';
 import { FailureError } from './errors';
 import { headerBytesOf, readHeader, readPrefix, writeHeader } from './header';
+import {
+  CONTINUATION_MASK,
+  CONTINUATION_PREFIX,
+  FIRST_FOUR_BYTE_LEAD,
+  FIRST_THREE_BYTE_LEAD,
+  FIRST_TWO_BYTE_LEAD,
+  LAST_FOUR_BYTE_LEAD,
+  LAST_THREE_BYTE_LEAD,
+  LAST_TWO_BYTE_LEAD,
+} from './unicode';
 import type {
   Envelope,
   IFailure,
@@ -78,7 +88,7 @@ const assertNothingAfter = (
 
 /** Whether `byte` continues a UTF-8 character rather than starts one. */
 const isContinuation = (byte: number | undefined): boolean => {
-  return byte !== undefined && (byte & 0xc0) === 0x80;
+  return byte !== undefined && (byte & CONTINUATION_MASK) === CONTINUATION_PREFIX;
 };
 
 /**
@@ -86,15 +96,15 @@ const isContinuation = (byte: number | undefined): boolean => {
  * other byte.
  */
 const sequenceBytesOf = (byte: number): number => {
-  if (byte >= 0xc2 && byte <= 0xdf) {
+  if (byte >= FIRST_TWO_BYTE_LEAD && byte <= LAST_TWO_BYTE_LEAD) {
     return 2;
   }
 
-  if (byte >= 0xe0 && byte <= 0xef) {
+  if (byte >= FIRST_THREE_BYTE_LEAD && byte <= LAST_THREE_BYTE_LEAD) {
     return 3;
   }
 
-  return byte >= 0xf0 && byte <= 0xf4 ? 4 : 1;
+  return byte >= FIRST_FOUR_BYTE_LEAD && byte <= LAST_FOUR_BYTE_LEAD ? 4 : 1;
 };
 
 /**
@@ -271,6 +281,10 @@ export const readEnvelope = (
   }
 };
 
+// the largest code a failure's record writes, in its 16 bits, and the most relays it counts, in its 8
+const LARGEST_FAILURE_CODE = 0xffff;
+const LARGEST_RELAYS = 0xff;
+
 /**
  * A failure's record, to send: its code, the relays it crossed, its scope, and its detail cut to
  * `maximumDetailBytes` at a character's boundary. Throws a {@link ProgrammerError} for a code that
@@ -283,13 +297,13 @@ export const writeFailure = (
 ): Uint8Array => {
   const { code, detail = '', relays = 0, scope } = failure;
 
-  if (!Number.isInteger(code) || code < 1 || code > 0xffff) {
+  if (!Number.isInteger(code) || code < 1 || code > LARGEST_FAILURE_CODE) {
     throw new ProgrammerError(
       `a failure's code is an integer from 1 to 65535, not ${String(code)}`
     );
   }
 
-  if (!Number.isInteger(relays) || relays < 0 || relays > 0xff) {
+  if (!Number.isInteger(relays) || relays < 0 || relays > LARGEST_RELAYS) {
     throw new ProgrammerError(
       `a failure crossed an integer from 0 to 255 relays, not ${String(relays)}`
     );

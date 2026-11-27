@@ -3,6 +3,7 @@
 // dependencies
 
 import { byteCountOf, ProgrammerError } from './errors';
+import { GOING_AWAY, MESSAGE_TOO_BIG, NORMAL_CLOSURE, PROTOCOL_ERROR } from './websocket-frame';
 import { isFieldValue } from '../client/transport-client';
 
 // interfaces
@@ -115,12 +116,15 @@ export const REFUSE_REASONS: Readonly<Record<number, string>> = Object.freeze({
   503: 'busy',
 });
 
-/** A CLOSE's codes, a WebSocket's (RFC 6455 §7.4.1), 4000 and 4001 of its private range. */
+/**
+ * A CLOSE's codes (spec 15.17): a WebSocket's, named as RFC 6455 §7.4.1 names them, and 4000 and
+ * 4001, Bead's own, of its private range.
+ */
 export const CloseCode = Object.freeze({
-  NORMAL: 1_000,
-  GOING_AWAY: 1_001,
-  PROTOCOL_ERROR: 1_002,
-  TOO_BIG: 1_009,
+  NORMAL_CLOSURE,
+  GOING_AWAY,
+  PROTOCOL_ERROR,
+  MESSAGE_TOO_BIG,
   LOST: 4_000,
   UNANSWERED: 4_001,
 });
@@ -151,6 +155,9 @@ const FLAGS_TAKEN: Readonly<Record<number, number>> = Object.freeze({
 const TOKEN = /^[A-Za-z0-9_-]{1,64}$/u;
 
 const TWO_32 = 2 ** 32;
+
+// the largest character a byte writes, U+00FF, as an id and a credential are written
+const LARGEST_BYTE = 0xff;
 
 // helpers
 
@@ -197,7 +204,7 @@ const bytesOfLatin1 = (text: string, what: string): Uint8Array => {
   return Uint8Array.from(text, (character) => {
     const code = character.charCodeAt(0);
 
-    if (code > 0xff) {
+    if (code > LARGEST_BYTE) {
       throw new ProgrammerError(
         `${what} is written a character a byte, not ${JSON.stringify(text)}`
       );
@@ -529,7 +536,11 @@ const u64Of = (value: number): Uint8Array => {
 const bodyBytesOf = (fields: ParcelFields): Uint8Array[] => {
   const { kind } = fields;
   const u16 = (value: number): Uint8Array => {
-    return Uint8Array.of(value >>> 8, value & 0xff);
+    const bytes = new Uint8Array(2);
+
+    new DataView(bytes.buffer).setUint16(0, value);
+
+    return bytes;
   };
   const u32 = (value: number): Uint8Array => {
     const bytes = new Uint8Array(4);

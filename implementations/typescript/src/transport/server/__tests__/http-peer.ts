@@ -118,7 +118,7 @@ export const OPCODES = Object.freeze({
 const DEFINED_OPCODES: ReadonlySet<number> = new Set(Object.values(OPCODES));
 
 // the masking key of RFC 6455's examples, 5.7: fixed, so what the peer writes is the same each run
-const MASK = Uint8Array.of(0x37, 0xfa, 0x21, 0x3d);
+const MASKING_KEY = Uint8Array.of(0x37, 0xfa, 0x21, 0x3d);
 
 // a close that carries no code, RFC 6455 7.1.5
 const NO_STATUS = 1005;
@@ -214,7 +214,7 @@ const framingOf = ({ fields, status }: IResponseHead): 'chunked' | 'end' | numbe
 export const frameOf = ({ fin, length = 0, opcode, payload }: IFrame): Uint8Array => {
   const announced = Math.max(length, payload.length);
   const extended = announced < 126 ? 0 : announced < 65_536 ? 2 : 8;
-  const at = 2 + extended + MASK.length;
+  const at = 2 + extended + MASKING_KEY.length;
   const frame = new Uint8Array(at + payload.length);
   const view = new DataView(frame.buffer);
 
@@ -227,9 +227,9 @@ export const frameOf = ({ fin, length = 0, opcode, payload }: IFrame): Uint8Arra
     view.setBigUint64(2, BigInt(announced));
   }
 
-  frame.set(MASK, 2 + extended);
+  frame.set(MASKING_KEY, 2 + extended);
   payload.forEach((byte, index) => {
-    view.setUint8(at + index, byte ^ (MASK[index % MASK.length] ?? 0));
+    view.setUint8(at + index, byte ^ (MASKING_KEY[index % MASKING_KEY.length] ?? 0));
   });
 
   return frame;
@@ -492,7 +492,7 @@ const createFrameReader = ({
       const short = second & 0x7f;
       const extended = short === 126 ? 2 : short === 127 ? 8 : 0;
       const isMasked = (second & 0x80) !== 0;
-      const at = 2 + extended + (isMasked ? MASK.length : 0);
+      const at = 2 + extended + (isMasked ? MASKING_KEY.length : 0);
 
       if (pending.length < at) {
         return;
@@ -509,9 +509,9 @@ const createFrameReader = ({
         return;
       }
 
-      const key = pending.subarray(2 + extended, 2 + extended + MASK.length);
+      const key = pending.subarray(2 + extended, 2 + extended + MASKING_KEY.length);
       const payload = Buffer.from(pending.subarray(at, at + length)).map((byte, index) => {
-        return isMasked ? byte ^ (key[index % MASK.length] ?? 0) : byte;
+        return isMasked ? byte ^ (key[index % MASKING_KEY.length] ?? 0) : byte;
       });
 
       pending = pending.subarray(at + length);

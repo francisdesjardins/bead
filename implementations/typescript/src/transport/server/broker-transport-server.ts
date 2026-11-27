@@ -424,7 +424,7 @@ export const createBrokerTransportServer = (
           }
         },
         close: (connection) => {
-          entryOf(connection.connectionHandle)?.connection?.close(CloseCode.NORMAL);
+          entryOf(connection.connectionHandle)?.connection?.close(CloseCode.NORMAL_CLOSURE);
 
           return Promise.resolve();
         },

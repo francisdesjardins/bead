@@ -214,7 +214,7 @@ test.describe('createFrameMeter', () => {
       maximumMessageFrames: 16_384,
       side: 'server',
     });
-    const key = [0x37, 0xfa, 0x21, 0x3d];
+    const maskingKey = [0x37, 0xfa, 0x21, 0x3d];
     const bytes = Uint8Array.from([
       0x82,
       0xff,
@@ -226,7 +226,7 @@ test.describe('createFrameMeter', () => {
       0,
       0,
       3,
-      ...key,
+      ...maskingKey,
       1 ^ 0x37,
       2 ^ 0xfa,
       3 ^ 0x21,

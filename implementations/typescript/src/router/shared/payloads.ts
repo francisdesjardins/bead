@@ -7,6 +7,7 @@
 // dependencies
 
 import { ProgrammerError } from '../../transport/shared/errors';
+import { BYTE_ORDER_MARK } from './unicode';
 
 // interfaces
 
@@ -65,25 +66,57 @@ export const CODEC_REASONS = Object.freeze({
 // how deep a json payload nests at most, the outermost at depth 1 (spec 17.5, item 7)
 const DEPTH = 64;
 
-// the characters a scan of a JSON text reads, by their codes
-const TAB = 0x09;
-const LINE_FEED = 0x0a;
-const CARRIAGE_RETURN = 0x0d;
-const SPACE = 0x20;
-const QUOTE = 0x22;
-const COMMA = 0x2c;
-const MINUS = 0x2d;
-const DIGIT_ZERO = 0x30;
-const DIGIT_NINE = 0x39;
-const OPEN_ARRAY = 0x5b;
-const BACKSLASH = 0x5c;
-const CLOSE_ARRAY = 0x5d;
+// the characters a scan of a JSON text reads, by their codes, as RFC 8259 names them
+
+/** RFC 8259 §2: begin-array, `[`. */
+export const BEGIN_ARRAY = 0x5b;
+
+/** RFC 8259 §2: end-array, `]`. */
+export const END_ARRAY = 0x5d;
+
+/** RFC 8259 §2: begin-object, `{`. */
+export const BEGIN_OBJECT = 0x7b;
+
+/** RFC 8259 §2: end-object, `}`. */
+export const END_OBJECT = 0x7d;
+
+/** RFC 8259 §2: name-separator, `:`. */
+export const NAME_SEPARATOR = 0x3a;
+
+/** RFC 8259 §2: value-separator, `,`. */
+export const VALUE_SEPARATOR = 0x2c;
+
+/** RFC 8259 §7: quotation-mark, `"`, which opens and closes a string. */
+export const QUOTATION_MARK = 0x22;
+
+/** RFC 8259 §7: escape, `\`, which opens an escape in a string. */
+export const ESCAPE = 0x5c;
+
+/** RFC 8259 §2: a space, of the insignificant whitespace `ws` allows. */
+export const SPACE = 0x20;
+
+/** RFC 8259 §2: a horizontal tab, of the insignificant whitespace `ws` allows. */
+export const HORIZONTAL_TAB = 0x09;
+
+/** RFC 8259 §2: a line feed, of the insignificant whitespace `ws` allows. */
+export const LINE_FEED = 0x0a;
+
+/** RFC 8259 §2: a carriage return, of the insignificant whitespace `ws` allows. */
+export const CARRIAGE_RETURN = 0x0d;
+
+/** RFC 8259 §6: minus, `-`, before a negative number's digits. */
+export const MINUS = 0x2d;
+
+/** RFC 8259 §6: the digit zero, `0`, the least of a number's digits. */
+export const DIGIT_ZERO = 0x30;
+
+/** RFC 8259 §6: the digit nine, `9`, the greatest of a number's digits. */
+export const DIGIT_NINE = 0x39;
+
+// the first letter of each literal name, `false`, `null` and `true` (RFC 8259 §3)
 const LETTER_F = 0x66;
 const LETTER_N = 0x6e;
 const LETTER_T = 0x74;
-const OPEN_OBJECT = 0x7b;
-const CLOSE_OBJECT = 0x7d;
-const BYTE_ORDER_MARK = 0xfeff;
 
 // helpers
 
@@ -100,7 +133,7 @@ const endOfString = (text: string, index: number): number => {
 
     let backslashes = 0;
 
-    while (text.charCodeAt(quote - 1 - backslashes) === BACKSLASH) {
+    while (text.charCodeAt(quote - 1 - backslashes) === ESCAPE) {
       backslashes += 1;
     }
 
@@ -122,15 +155,15 @@ const assertDepth = (text: string): void => {
   for (let index = 0; index < text.length; index += 1) {
     const code = text.charCodeAt(index);
 
-    if (code === QUOTE) {
+    if (code === QUOTATION_MARK) {
       index = endOfString(text, index);
-    } else if (code === OPEN_ARRAY || code === OPEN_OBJECT) {
+    } else if (code === BEGIN_ARRAY || code === BEGIN_OBJECT) {
       depth += 1;
 
       if (depth > DEPTH) {
         throw new SyntaxError(CODEC_REASONS.nestedPast64);
       }
-    } else if (code === CLOSE_ARRAY || code === CLOSE_OBJECT) {
+    } else if (code === END_ARRAY || code === END_OBJECT) {
       depth -= 1;
     }
   }
@@ -200,7 +233,7 @@ const scanNames = (text: string): { isEscaped: boolean; isOnce: boolean } => {
   for (let index = 0; index < text.length; index += 1) {
     const code = text.charCodeAt(index);
 
-    if (code === QUOTE) {
+    if (code === QUOTATION_MARK) {
       const end = endOfString(text, index);
       const isEscaped = backslash !== -1 && backslash < end;
 
@@ -225,13 +258,13 @@ const scanNames = (text: string): { isEscaped: boolean; isOnce: boolean } => {
       }
 
       index = end;
-    } else if (code === OPEN_OBJECT || code === OPEN_ARRAY) {
-      scopes.push(code === OPEN_OBJECT ? new Set() : undefined);
-      expectsName = code === OPEN_OBJECT;
-    } else if (code === CLOSE_OBJECT || code === CLOSE_ARRAY) {
+    } else if (code === BEGIN_OBJECT || code === BEGIN_ARRAY) {
+      scopes.push(code === BEGIN_OBJECT ? new Set() : undefined);
+      expectsName = code === BEGIN_OBJECT;
+    } else if (code === END_OBJECT || code === END_ARRAY) {
       scopes.pop();
       expectsName = false;
-    } else if (code === COMMA) {
+    } else if (code === VALUE_SEPARATOR) {
       expectsName = scopes.at(-1) !== undefined;
     }
   }
@@ -262,11 +295,11 @@ const isScalarStart = (code: number): boolean => {
 /** Whether `code` ends a number or a literal: what may follow one in a JSON text. */
 const endsScalar = (code: number): boolean => {
   return (
-    code === COMMA ||
-    code === CLOSE_ARRAY ||
-    code === CLOSE_OBJECT ||
+    code === VALUE_SEPARATOR ||
+    code === END_ARRAY ||
+    code === END_OBJECT ||
     code === SPACE ||
-    code === TAB ||
+    code === HORIZONTAL_TAB ||
     code === LINE_FEED ||
     code === CARRIAGE_RETURN
   );
@@ -291,7 +324,7 @@ const firstFault = (text: string): { isEscaped: boolean; reason: string | undefi
   for (let index = 0; index < text.length; index += 1) {
     const code = text.charCodeAt(index);
 
-    if (code === QUOTE) {
+    if (code === QUOTATION_MARK) {
       const end = endOfString(text, index);
       const isEscaped = backslash !== -1 && backslash < end;
       const names = scopes.at(-1);
@@ -323,13 +356,13 @@ const firstFault = (text: string): { isEscaped: boolean; reason: string | undefi
       }
 
       index = end;
-    } else if (code === OPEN_OBJECT || code === OPEN_ARRAY) {
-      scopes.push(code === OPEN_OBJECT ? new Set() : undefined);
-      expectsName = code === OPEN_OBJECT;
-    } else if (code === CLOSE_OBJECT || code === CLOSE_ARRAY) {
+    } else if (code === BEGIN_OBJECT || code === BEGIN_ARRAY) {
+      scopes.push(code === BEGIN_OBJECT ? new Set() : undefined);
+      expectsName = code === BEGIN_OBJECT;
+    } else if (code === END_OBJECT || code === END_ARRAY) {
       scopes.pop();
       expectsName = false;
-    } else if (code === COMMA) {
+    } else if (code === VALUE_SEPARATOR) {
       expectsName = scopes.at(-1) !== undefined;
     } else if (code === MINUS || (code >= DIGIT_ZERO && code <= DIGIT_NINE)) {
       let end = index + 1;
@@ -381,7 +414,7 @@ const buildJson = (text: string): unknown => {
   for (let index = 0; index < text.length; index += 1) {
     const code = text.charCodeAt(index);
 
-    if (code === QUOTE) {
+    if (code === QUOTATION_MARK) {
       const end = endOfString(text, index);
       const read = JSON.parse(text.slice(index, end + 1)) as string;
       const top = open.at(-1);
@@ -393,12 +426,12 @@ const buildJson = (text: string): unknown => {
       }
 
       index = end;
-    } else if (code === OPEN_OBJECT || code === OPEN_ARRAY) {
-      const container = code === OPEN_OBJECT ? {} : [];
+    } else if (code === BEGIN_OBJECT || code === BEGIN_ARRAY) {
+      const container = code === BEGIN_OBJECT ? {} : [];
 
       place(container);
       open.push({ container, name: undefined });
-    } else if (code === CLOSE_OBJECT || code === CLOSE_ARRAY) {
+    } else if (code === END_OBJECT || code === END_ARRAY) {
       open.pop();
     } else if (isScalarStart(code)) {
       let end = index + 1;

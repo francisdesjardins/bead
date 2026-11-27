@@ -51,6 +51,7 @@ import {
 } from '../shared/ready-state';
 import type { Data, ITlsOptions, ITransportMessage } from '../shared/types';
 import { assertCount, MAXIMUM_MESSAGE_FRAMES } from '../server/server-bounds';
+import { NORMAL_CLOSURE, POLICY_VIOLATION } from '../shared/websocket-frame';
 import { dispose } from './symbols';
 import {
   createTransportClient,
@@ -636,7 +637,7 @@ export const createWebSocketTransportClient = (
                                 error.message === WS_TOO_MANY_FRAMES_MESSAGE
                               ? closedWithOf('the connection', {
                                   cause: error,
-                                  code: 1008,
+                                  code: POLICY_VIOLATION,
                                   why: `a message past its maximumMessageFrames, ${String(maximumMessageFrames)} frames`,
                                 })
                               : error;
@@ -920,7 +921,7 @@ export const createWebSocketTransportClient = (
 
             try {
               flushQueue();
-              socket.close(1000); // @see https://developer.mozilla.org/en-US/docs/Web/API/CloseEvent
+              socket.close(NORMAL_CLOSURE); // @see https://developer.mozilla.org/en-US/docs/Web/API/CloseEvent
             } catch (reason) {
               return (reject(wrapReason(ProgrammerError, reason)), undefined);
             }

@@ -12,6 +12,14 @@
 // an options object, and stays review's (decision 0006), as the one optional positional where no
 // second could come does. `oxlint-plugin.cases.ts` beside it holds a line for
 // each verdict, and `check-oxlint-plugin.mjs` fails unless exactly its marked lines are refused.
+//
+// `bead/wire-literal` holds the notation rule (decision 0057) over the modules that name a wire
+// format's numbers and those that read them, as the TypeScript column of the root's
+// `tools/wire-names.tsv` lists them. `wire-literal.cases.ts` beside it holds its cases.
+
+import { existsSync, readFileSync } from 'node:fs';
+import { dirname, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 // ── Known exceptions ─────────────────────────────────────────────────────────
 
@@ -427,4 +435,200 @@ const optionsLast = {
   },
 };
 
-export default { meta: { name: 'bead' }, rules: { 'options-last': optionsLast } };
+// ── The modules a wire format's numbers stand in ─────────────────────────────
+
+/** The package's folder, which a table's path and a module's are given from. */
+const PACKAGE = resolve(dirname(fileURLToPath(import.meta.url)), '..');
+
+/** The table the modules are read from by default, from the package's folder. */
+const WIRE_TABLE = '../../tools/wire-names.tsv';
+
+/** The TypeScript column of a row of the table: format, concept, standard, value, then it. */
+const TYPESCRIPT_COLUMN = 4;
+
+/** A path as two spellings of it compare: one separator, and Windows's case folded. */
+function keyOfPath(path) {
+  const key = resolve(path).replaceAll('\\', '/');
+  return process.platform === 'win32' ? key.toLowerCase() : key;
+}
+
+/**
+ * The modules a table's TypeScript column names, each from the repository's root, holders and
+ * readers alike: a cell that opens with `-` is a reason, any other its paths by `, `, each before
+ * its `#`.
+ */
+export function tableModulesOf(text) {
+  const modules = new Set();
+  for (const line of text.split('\n')) {
+    if (line.trim() === '' || line.startsWith('#')) {
+      continue;
+    }
+    const cell = line.replace(/\r$/u, '').split('\t')[TYPESCRIPT_COLUMN]?.trim() ?? '';
+    if (cell === '' || cell.startsWith('-')) {
+      continue;
+    }
+    for (const entry of cell.split(', ')) {
+      modules.add(entry.split('#')[0].trim());
+    }
+  }
+  return [...modules];
+}
+
+/**
+ * The keys of the modules the rule holds: those `modules` gives from the package's folder, or else
+ * those the table at `table` names, the repository's root being the folder its `tools/` sits in.
+ * It throws on a table or a module missing, or on no module at all, so that a rule holding nothing
+ * fails the lint rather than passes it.
+ */
+export function wireModulesOf({ modules, table = WIRE_TABLE } = {}) {
+  let paths;
+  if (modules === undefined) {
+    const tablePath = resolve(PACKAGE, table);
+    if (!existsSync(tablePath)) {
+      throw new Error(`bead/wire-literal: no table at ${tablePath}`);
+    }
+    const root = resolve(dirname(tablePath), '..');
+    paths = tableModulesOf(readFileSync(tablePath, 'utf8')).map((path) => {
+      return resolve(root, path);
+    });
+  } else {
+    paths = modules.map((path) => {
+      return resolve(PACKAGE, path);
+    });
+  }
+  if (paths.length === 0) {
+    throw new Error('bead/wire-literal: the table names no TypeScript module');
+  }
+  const missing = paths.filter((path) => {
+    return !existsSync(path);
+  });
+  if (missing.length > 0) {
+    throw new Error(
+      `bead/wire-literal: a module the table names is missing: ${missing.join(', ')}`
+    );
+  }
+  return new Set(paths.map(keyOfPath));
+}
+
+// each configuration's modules, read once a run
+const WIRE_MODULES = new Map();
+
+function wireModulesFor(options) {
+  const key = JSON.stringify(options ?? {});
+  if (!WIRE_MODULES.has(key)) {
+    WIRE_MODULES.set(key, wireModulesOf(options));
+  }
+  return WIRE_MODULES.get(key);
+}
+
+// ── The notation rule ────────────────────────────────────────────────────────
+
+const WIRE_MESSAGES = Object.freeze({
+  literal:
+    'a hex or binary literal stands in a definition: a module-level `const` named after its standard (decision 0057)',
+  operand:
+    '`&`, `|` and `^` take no integer literal above 1 outside a definition: name it after its standard (decision 0057)',
+});
+
+/** A hex or binary integer literal, a BigInt's among them: `0x80`, `0b0010`, `0xffn`. */
+const HEX_OR_BINARY = /^0[xb]/iu;
+
+/** The bitwise operators the rule holds, compound forms included; a shift is review's. */
+const BITWISE = new Set(['&', '|', '^', '&=', '|=', '^=']);
+
+const FUNCTIONS = new Set(['ArrowFunctionExpression', 'FunctionDeclaration', 'FunctionExpression']);
+
+/**
+ * Whether `node` stands in a definition: a module-level `const` whose name opens with a capital, a
+ * frozen object's members included, with no function between it and the declaration.
+ */
+function isInDefinition(node) {
+  for (let at = node.parent; at !== undefined && at !== null; at = at.parent) {
+    if (FUNCTIONS.has(at.type)) {
+      return false;
+    }
+    if (at.type === 'VariableDeclarator') {
+      const declaration = at.parent;
+      const holder =
+        declaration.parent?.type === 'ExportNamedDeclaration'
+          ? declaration.parent.parent
+          : declaration.parent;
+      return (
+        declaration.kind === 'const' &&
+        holder?.type === 'Program' &&
+        at.id.type === 'Identifier' &&
+        /^[A-Z]/u.test(at.id.name)
+      );
+    }
+  }
+  return false;
+}
+
+/** Whether `node` is an integer literal above 1, a BigInt's among them, its parentheses aside. */
+function isLiteralAboveOne(node) {
+  let at = node;
+  while (at?.type === 'ParenthesizedExpression') {
+    at = at.expression;
+  }
+  if (at?.type !== 'Literal') {
+    return false;
+  }
+  if (typeof at.bigint === 'string') {
+    return BigInt(at.bigint) > 1n;
+  }
+  return typeof at.value === 'number' && Number.isInteger(at.value) && at.value > 1;
+}
+
+const wireLiteral = {
+  meta: {
+    type: 'problem',
+    docs: {
+      description:
+        "A wire format's numbers stand in definitions named after their standard (decision 0057).",
+    },
+    schema: [
+      {
+        type: 'object',
+        properties: {
+          modules: { type: 'array', items: { type: 'string' } },
+          table: { type: 'string' },
+        },
+        additionalProperties: false,
+      },
+    ],
+  },
+  create(context) {
+    const modules = wireModulesFor(context.options[0]);
+    if (!modules.has(keyOfPath(context.filename))) {
+      return {};
+    }
+    const judgeOperands = (node, operands) => {
+      if (BITWISE.has(node.operator) && operands.some(isLiteralAboveOne) && !isInDefinition(node)) {
+        context.report({ node, message: WIRE_MESSAGES.operand });
+      }
+    };
+    return {
+      Literal: (node) => {
+        if (
+          typeof node.raw === 'string' &&
+          HEX_OR_BINARY.test(node.raw) &&
+          (typeof node.value === 'number' || typeof node.bigint === 'string') &&
+          !isInDefinition(node)
+        ) {
+          context.report({ node, message: WIRE_MESSAGES.literal });
+        }
+      },
+      BinaryExpression: (node) => {
+        judgeOperands(node, [node.left, node.right]);
+      },
+      AssignmentExpression: (node) => {
+        judgeOperands(node, [node.right]);
+      },
+    };
+  },
+};
+
+export default {
+  meta: { name: 'bead' },
+  rules: { 'options-last': optionsLast, 'wire-literal': wireLiteral },
+};

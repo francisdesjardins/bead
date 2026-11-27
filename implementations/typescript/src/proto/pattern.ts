@@ -4,6 +4,10 @@
 // walked a code point at a time, its class by a search of the ranges' bounds, then one cell, so a
 // match costs a constant per character whatever the pattern (decision 0035).
 
+// dependencies
+
+import { FIRST_HIGH_SURROGATE, LAST_LOW_SURROGATE } from '../router/shared/unicode';
+
 // interfaces
 
 /**
@@ -30,10 +34,6 @@ export interface IPatternTable {
 // constants
 
 const REPLACEMENT_CHARACTER = 0xfffd;
-
-const SURROGATES_FIRST = 0xd800;
-
-const SURROGATES_LAST = 0xdfff;
 
 // helpers
 
@@ -75,7 +75,7 @@ export const matchesPattern = (table: IPatternTable, text: string): boolean => {
   for (const character of text) {
     const read = character.codePointAt(0) ?? REPLACEMENT_CHARACTER;
     const point =
-      read >= SURROGATES_FIRST && read <= SURROGATES_LAST ? REPLACEMENT_CHARACTER : read;
+      read >= FIRST_HIGH_SURROGATE && read <= LAST_LOW_SURROGATE ? REPLACEMENT_CHARACTER : read;
 
     state = transitions[state * classCount + classOf(table, point)] ?? dead;
 

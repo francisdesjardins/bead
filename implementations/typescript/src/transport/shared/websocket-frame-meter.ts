@@ -1,5 +1,31 @@
 // ── WebSocket frame meter ─────────────────────────────────────────────────────
 
+// dependencies
+
+import {
+  BINARY,
+  CLOSE,
+  CONTINUATION,
+  CONTROL_BIT,
+  EXTENDED_LENGTH_16,
+  EXTENDED_LENGTH_64,
+  FIN_BIT,
+  LENGTH_TOP_BIT,
+  LONGEST_CONTROL_PAYLOAD,
+  LONGEST_HEAD_BYTES,
+  MASK_BIT,
+  MASKING_KEY_BYTES,
+  MESSAGE_TOO_BIG,
+  OPCODE_MASK,
+  PAYLOAD_LENGTH_MASK,
+  PING,
+  POLICY_VIOLATION,
+  PONG,
+  PROTOCOL_ERROR,
+  RESERVED_MASK,
+  TEXT,
+} from './websocket-frame';
+
 // interfaces
 
 /** A verdict a frame's head draws, and the close code it fails its connection with (spec 15.3). */
@@ -8,7 +34,7 @@ export interface IFrameVerdict {
    * 1002, a head RFC 6455 forbids; 1008, a message past `maximumMessageFrames`; 1009, a message
    * past `maximumMessageBytes`.
    */
-  readonly code: 1002 | 1008 | 1009;
+  readonly code: typeof PROTOCOL_ERROR | typeof POLICY_VIOLATION | typeof MESSAGE_TOO_BIG;
   /** What the head broke, in the spec's words. */
   readonly reason: string;
 }
@@ -83,13 +109,15 @@ type Share = { -readonly [K in keyof IMessageShare]: IMessageShare[K] };
  */
 export const HEAD_CHARGE = 128;
 
-// the opcodes RFC 6455 §5.2 defines that a head reads apart
-const CONTINUATION = 0x0;
-const CLOSE = 0x8;
-// a control frame's opcode is 8 or more, a data frame's under it
-const CONTROL = 0x8;
-// the longest payload of a control frame (RFC 6455 §5.5)
-const LONGEST_CONTROL = 125;
+// the opcodes RFC 6455 §5.2 defines; every other is reserved
+const DEFINED_OPCODES: ReadonlySet<number> = new Set([
+  CONTINUATION,
+  TEXT,
+  BINARY,
+  CLOSE,
+  PING,
+  PONG,
+]);
 
 // what a read past the meter's end brings: nothing
 const NOTHING: IMeteredRead = Object.freeze({
@@ -102,7 +130,7 @@ const NOTHING: IMeteredRead = Object.freeze({
 
 // whether an opcode is one RFC 6455 §5.2 defines: a continuation, text, binary, close, ping, pong
 const isDefined = (opcode: number): boolean => {
-  return opcode <= 0x2 || (opcode >= CLOSE && opcode <= 0xa);
+  return DEFINED_OPCODES.has(opcode);
 };
 
 /**
@@ -135,7 +163,7 @@ export const createFrameMeter = ({
   maximumMessageFrames,
   side,
 }: IFrameMeterOptions): IFrameMeter => {
-  const head = new Uint8Array(14);
+  const head = new Uint8Array(LONGEST_HEAD_BYTES);
   const view = new DataView(head.buffer);
   // the head under way: its bytes read, those its length ends at and those it needs, known from its
   // second
@@ -157,35 +185,35 @@ export const createFrameMeter = ({
 
   // the verdict of a head's first byte, which tells its kind
   const judgeFirst = (byte: number): IFrameVerdict | undefined => {
-    const code = byte & 0x0f;
-    const isControl = code >= CONTROL;
+    const code = byte & OPCODE_MASK;
+    const isControl = (code & CONTROL_BIT) !== 0;
 
-    if ((byte & 0x70) !== 0) {
-      return { code: 1002, reason: 'a reserved bit set' };
+    if ((byte & RESERVED_MASK) !== 0) {
+      return { code: PROTOCOL_ERROR, reason: 'a reserved bit set' };
     }
 
     if (!isDefined(code)) {
-      return { code: 1002, reason: `a reserved opcode, ${String(code)}` };
+      return { code: PROTOCOL_ERROR, reason: `a reserved opcode, ${String(code)}` };
     }
 
-    if (isControl && (byte & 0x80) === 0) {
-      return { code: 1002, reason: 'a control frame not final' };
+    if (isControl && (byte & FIN_BIT) === 0) {
+      return { code: PROTOCOL_ERROR, reason: 'a control frame not final' };
     }
 
     if (code === CONTINUATION && !isPartway) {
-      return { code: 1002, reason: 'a continuation with no message under way' };
+      return { code: PROTOCOL_ERROR, reason: 'a continuation with no message under way' };
     }
 
     if (!isControl && code !== CONTINUATION && isPartway) {
       return {
-        code: 1002,
+        code: PROTOCOL_ERROR,
         reason: 'a data frame that is not a continuation while a message is under way',
       };
     }
 
     // * every data frame counts, an empty one among them, the first one included
     if (!isControl && (code === CONTINUATION ? frames : 0) + 1 > maximumMessageFrames) {
-      return { code: 1008, reason: 'a message past its maximumMessageFrames' };
+      return { code: POLICY_VIOLATION, reason: 'a message past its maximumMessageFrames' };
     }
 
     return undefined;
@@ -193,34 +221,37 @@ export const createFrameMeter = ({
 
   // the verdict of a head's second byte, which tells its mask and its length's form
   const judgeSecond = (byte: number): IFrameVerdict | undefined => {
-    const isMasked = (byte & 0x80) !== 0;
-    const short = byte & 0x7f;
+    const isMasked = (byte & MASK_BIT) !== 0;
+    const short = byte & PAYLOAD_LENGTH_MASK;
 
     if (isMasked !== (side === 'server')) {
-      return { code: 1002, reason: side === 'server' ? 'an unmasked frame' : 'a masked frame' };
+      return {
+        code: PROTOCOL_ERROR,
+        reason: side === 'server' ? 'an unmasked frame' : 'a masked frame',
+      };
     }
 
-    if (opcode >= CONTROL && short > LONGEST_CONTROL) {
-      return { code: 1002, reason: 'a control frame longer than 125 bytes' };
+    if ((opcode & CONTROL_BIT) !== 0 && short > LONGEST_CONTROL_PAYLOAD) {
+      return { code: PROTOCOL_ERROR, reason: 'a control frame longer than 125 bytes' };
     }
 
-    lengthEnd = 2 + (short === 126 ? 2 : short === 127 ? 8 : 0);
-    headNeeded = lengthEnd + (isMasked ? 4 : 0);
+    lengthEnd = 2 + (short === EXTENDED_LENGTH_16 ? 2 : short === EXTENDED_LENGTH_64 ? 8 : 0);
+    headNeeded = lengthEnd + (isMasked ? MASKING_KEY_BYTES : 0);
 
     return undefined;
   };
 
   // the length a head announces, once its last byte came, its top bit judged already: a 64-bit one
-  // read as two halves, since a number holds 53 bits
+  // past 2 ** 53 rounded to the nearest number
   const lengthOf = (): number => {
-    const short = (head[1] ?? 0) & 0x7f;
+    const short = (head[1] ?? 0) & PAYLOAD_LENGTH_MASK;
 
-    if (short === 126) {
+    if (short === EXTENDED_LENGTH_16) {
       return view.getUint16(2);
     }
 
-    if (short === 127) {
-      return view.getUint32(2) * 0x1_0000_0000 + view.getUint32(6);
+    if (short === EXTENDED_LENGTH_64) {
+      return Number(view.getBigUint64(2));
     }
 
     return short;
@@ -267,7 +298,7 @@ export const createFrameMeter = ({
         return { handed: at, shares, verdict: undefined };
       }
 
-      if (opcode < CONTROL && isFinal) {
+      if ((opcode & CONTROL_BIT) === 0 && isFinal) {
         shareAt(at).isWhole = true;
         isPartway = false;
         share = undefined;
@@ -284,7 +315,7 @@ export const createFrameMeter = ({
           const charged = shareAt(at);
 
           charged.charge += taken;
-          charged.payload += opcode < CONTROL ? taken : 0;
+          charged.payload += (opcode & CONTROL_BIT) === 0 ? taken : 0;
         }
 
         remaining -= taken;
@@ -317,10 +348,10 @@ export const createFrameMeter = ({
           return fail(verdict);
         }
 
-        opcode = byte & 0x0f;
-        isFinal = (byte & 0x80) !== 0;
+        opcode = byte & OPCODE_MASK;
+        isFinal = (byte & FIN_BIT) !== 0;
 
-        if (opcode < CONTROL) {
+        if ((opcode & CONTROL_BIT) === 0) {
           // * a message begins at its first frame's first byte
           if (opcode !== CONTINUATION) {
             isPartway = true;
@@ -342,18 +373,18 @@ export const createFrameMeter = ({
 
       // ! a 64-bit length's top bit is judged at that length's first byte, the head's third, which
       // breaks its head (RFC 6455 §5.2)
-      if (headLength === 3 && lengthEnd === 10 && (byte & 0x80) !== 0) {
-        return fail({ code: 1002, reason: 'a 64-bit length with its top bit set' });
+      if (headLength === 3 && lengthEnd === 10 && (byte & LENGTH_TOP_BIT) !== 0) {
+        return fail({ code: PROTOCOL_ERROR, reason: 'a 64-bit length with its top bit set' });
       }
 
       // * judged at its length's last byte, before its mask, as `ws` reads it: a continuation's among
       // them, without waiting for its payload
       if (headLength === lengthEnd) {
         length = lengthOf();
-        announced += opcode < CONTROL ? length : 0;
+        announced += (opcode & CONTROL_BIT) === 0 ? length : 0;
 
         if (announced > maximumMessageBytes) {
-          return fail({ code: 1009, reason: 'a message past its maximumMessageBytes' });
+          return fail({ code: MESSAGE_TOO_BIG, reason: 'a message past its maximumMessageBytes' });
         }
       }
 
