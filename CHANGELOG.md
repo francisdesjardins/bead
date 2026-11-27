@@ -78,6 +78,15 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - The Rust side's HTTP and WebSocket server facades refuse a server given a clock over a transport
   given none in the words every side's server writes: "a server runs on the clock of its
   transport, the platform's, and was given another, one of its own".
+- A list held to rules is refused for the first rule any item breaks, in the order the rules are
+  stated. Spec 15.14 states a join's: none given, an element that is no transport, a join among
+  them, two of one type, then two clocks; transcoding 3.9 judges every route's own rules before a
+  tie between two. On each side:
+  - the TypeScript side judges a join's rules one at a time over every transport, and refuses an
+    element that is none or no object in its own words, `a join takes transports, not …`, and a
+    transport that names no clock as a router does, `which names none`;
+  - the C# and Rust sides judge a join's clock after every rule of its types;
+  - the Rust side judges a gateway's ties after every route's own rules, as the other sides do.
 - **Breaking:** a router's transport names the clock it runs on, on every side. On the
   TypeScript side, `clock` is required on `IRouterServerTransportLike`,
   `IRouterClientTransportLike` and `IJoinableTransportServer`, and a join's `clock` is always
