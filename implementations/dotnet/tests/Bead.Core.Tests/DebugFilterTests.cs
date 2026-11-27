@@ -280,6 +280,22 @@ public sealed class DebugFilterTests
     }
 
     [Fact]
+    public void Matches_supplementary_characters_in_a_debug_filter_and_quotes_them_in_a_refusal()
+    {
+        DebugEvent[] names = [EventOf("get😀"), EventOf("get😁"), EventOf("get😀Status")];
+
+        Assert.Equal(["get😀 tx request"], HeardOf("get😀", names));
+        Assert.Equal(["get😀 tx request", "get😀Status tx request"], HeardOf("get😀*", names));
+        Assert.Equal(["get😀 tx request", "get😀Status tx request"], HeardOf("*😀*", names));
+        var refused = Assert.Throws<ArgumentException>(() =>
+        {
+            return DebugFilter.Parse("d(😀)");
+        });
+
+        Assert.Equal("a debug filter takes a direction among rx, tx, not \"😀\"", refused.Message);
+    }
+
+    [Fact]
     public void Keeps_a_direction_a_type_and_the_names_that_match_without_regard_to_case()
     {
         Assert.Equal(["getStatus rx request", "GetTime rx request", "news rx notification"], HeardOf("d(rx)", Events));

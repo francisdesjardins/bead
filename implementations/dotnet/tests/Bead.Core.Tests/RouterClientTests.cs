@@ -11,6 +11,49 @@ namespace Bead.Tests;
 public sealed partial class RouterClientTests
 {
     [Fact]
+    public async Task Reports_an_application_error_without_sending_anything()
+    {
+        using var scripted = new ScriptedRouter();
+        var reason = new InvalidOperationException("application error");
+
+        scripted.Router.Report(reason, null);
+        await scripted.Settle();
+
+        Assert.Same(reason, Assert.Single(scripted.Errors));
+        Assert.Empty(scripted.Transport.Envelopes);
+    }
+
+    [Fact]
+    public void Refuses_an_empty_JWT_default_credential_as_a_client_router_is_built()
+    {
+        var transport = new ScriptedTransport();
+        var refused = Assert.Throws<ArgumentException>(() =>
+        {
+            return new RouterClient(transport, new RouterClientOptions { Credential = Credential.Jwt("") });
+        });
+        Assert.StartsWith("a call that presents a JWT gives its token, a string", refused.Message, StringComparison.Ordinal);
+        Assert.Empty(transport.Envelopes);
+    }
+
+    [Fact]
+    public async Task Refuses_a_client_router_notification_before_sending_anything()
+    {
+        using var scripted = new ScriptedRouter();
+        var request = new NotifyRequest { Procedure = Service.Address };
+        var bytes = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+        {
+            return scripted.Router.Notify(ReadOnlyMemory<byte>.Empty, request);
+        });
+        var unwritten = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+        {
+            return scripted.Router.Notify(new InvalidOperationException("unwritten"), request);
+        });
+        Assert.Equal("only a server notifies; a client hears notifications", bytes.Message);
+        Assert.Equal(bytes.Message, unwritten.Message);
+        Assert.Empty(scripted.Transport.Envelopes);
+    }
+
+    [Fact]
     public async Task Go_to_the_resolver_registered_for_their_procedure_on_even_call_ids_which_answers()
     {
         using var scripted = new ScriptedRouter();

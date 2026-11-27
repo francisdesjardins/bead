@@ -138,7 +138,7 @@ public sealed record CallSession
             case null or { Scheme: CredentialScheme.None or CredentialScheme.Opaque }:
                 break;
             case { Scheme: CredentialScheme.Jwt, Token: null or "" }:
-                throw new ArgumentException("a call that presents a JWT gives its token", nameof(asked));
+                throw new ArgumentException("a call that presents a JWT gives its token, a string", nameof(asked));
             case { Scheme: CredentialScheme.Jwt }:
                 break;
             case { Scheme: CredentialScheme.Elsewhere, Carried: null }:

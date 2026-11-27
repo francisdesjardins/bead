@@ -24,6 +24,54 @@ use crate::service::{
 use crate::testing::patience;
 use crate::transcoding::routes::{HttpRouteInit, HttpRouteTemplate, route_of};
 
+#[tokio::test]
+async fn refuses_a_subscription_credential_with_boundary_whitespace_before_sending() {
+    let service = Service::new();
+    let routes = service.routes();
+    let listener = TcpListener::bind((HOST, 0)).await.expect("bound");
+    let url = format!(
+        "http://{HOST}:{}",
+        listener.local_addr().expect("its address").port()
+    );
+    let caller = caller_of(&url, &HttpCallerOptions::default());
+    let subscriber = caller
+        .subscriber_of(&routes[3], &service.news)
+        .expect("news' subscriber");
+    for authorization in [
+        " Bearer good",
+        "Bearer good ",
+        "\tBearer good",
+        "Bearer good\t",
+    ] {
+        let options = HttpCallOptions {
+            authorization: Some(authorization.to_owned()),
+            ..HttpCallOptions::default()
+        };
+        let mut subscription = subscriber.call(&String::new(), &options);
+        let refused = patience(PATIENCE, subscription.next())
+            .await
+            .expect("the refusal")
+            .expect("one error")
+            .expect_err("invalid field");
+        assert!(matches!(&refused, CallError::Refused(_)));
+        assert_eq!(refused.to_string(), NO_FIELD_VALUE);
+        assert!(
+            patience(PATIENCE, subscription.next())
+                .await
+                .expect("the end")
+                .is_none()
+        );
+    }
+    assert!(
+        listener
+            .into_std()
+            .expect("a standard listener")
+            .accept()
+            .is_err(),
+        "no request reaches the listener"
+    );
+}
+
 fn procedure(name: &str, (procedure_id, kind): (u16, Option<ProcedureKind>)) -> Procedure {
     Procedure {
         service_id: 7,

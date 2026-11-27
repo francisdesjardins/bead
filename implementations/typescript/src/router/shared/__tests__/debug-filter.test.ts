@@ -137,6 +137,17 @@ test.describe('parseDebugFilter', () => {
 });
 
 test.describe('filterDebug', () => {
+  test('matches supplementary characters in a debug filter and quotes them in a refusal', () => {
+    const names = [eventOf('get😀'), eventOf('get😁'), eventOf('get😀Status')];
+
+    expect(heardOf('get😀', names)).toEqual(['get😀 tx request']);
+    expect(heardOf('get😀*', names)).toEqual(['get😀 tx request', 'get😀Status tx request']);
+    expect(heardOf('*😀*', names)).toEqual(['get😀 tx request', 'get😀Status tx request']);
+    expect(() => {
+      return parseDebugFilter('d(😀)');
+    }).toThrow(new ProgrammerError('a debug filter takes a direction among rx, tx, not "😀"'));
+  });
+
   const events = [
     eventOf('getStatus'),
     eventOf('getStatus', { direction: 'rx' }),

@@ -10,6 +10,36 @@ namespace Bead.Tests;
 public sealed class HeartbeatTests
 {
     [Fact]
+    public void Waits_out_a_heartbeat_when_its_timer_fires_before_the_ping_deadline()
+    {
+        var clock = new DelayedClock();
+        var heard = new List<string>();
+        var heartbeat = new Heartbeat(TimeSpan.FromMilliseconds(100), new HeartbeatHooks
+        {
+            Ping = () => { heard.Add("ping"); },
+            Drop = () => { heard.Add("drop"); },
+        }, new HeartbeatOptions { Clock = clock });
+
+        try
+        {
+            clock.Fire([100, 100]);
+            Assert.Equal(["ping"], heard);
+            clock.Fire([149, 149]);
+            Assert.Equal(["ping"], heard);
+            clock.Fire([199, 199]);
+            Assert.Equal(["ping"], heard);
+            Assert.Equal([100, 100, 51, 1], clock.Dues);
+            clock.Fire([200, 200]);
+            Assert.Equal(["ping", "drop"], heard);
+            Assert.False(clock.IsArmed);
+        }
+        finally
+        {
+            heartbeat.Stop();
+        }
+    }
+
+    [Fact]
     public async Task Arms_nothing_for_never_and_a_stop_clears_the_timer()
     {
         var clock = new SteppingClock(DateTimeOffset.UnixEpoch);

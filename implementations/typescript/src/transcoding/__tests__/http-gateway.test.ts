@@ -96,6 +96,58 @@ const ORIGIN = 'https://app.example';
 const NO_CREDENTIAL =
   '{"code":32,"scope":"protocol","status":401,"title":"SESSION_REQUIRED","type":"tag:francisdesjardins.ca,2026:bead/SESSION_REQUIRED"}';
 
+test('answers a refused HEAD subscription with an empty problem response and frees its place', async () => {
+  await using memory = createMemoryTransportServer();
+  await memory.start();
+  await using gateway = createHTTPGateway({
+    createServer: createNodeServer,
+    heartbeat: Infinity,
+    maximumExchanges: 1,
+    maximumConnectionsPerAddress: 1,
+    routes: HTTP_ROUTES,
+    transport: memory,
+  });
+  const reported = reportedBy(gateway);
+  let requests = 0;
+  memory.on('message', ({ data }, connectionHandle) => {
+    const envelope = readEnvelope(bytesOf(data), {
+      failures: SERVER_FAILURES,
+      maximumEnvelopeBytes: LIMIT_DEFAULTS.maximumEnvelopeBytes,
+    });
+    if (envelope?.kind === EnvelopeKind.REQUEST) {
+      requests += 1;
+      void memory.send(
+        {
+          data: writeEnvelope({
+            failure: SERVER_FAILURES.sessionRequired,
+            header: { callId: envelope.header.callId, kind: EnvelopeKind.FAILURE },
+            kind: EnvelopeKind.FAILURE,
+          }),
+        },
+        connectionHandle
+      );
+    }
+  });
+  const { port } = await gateway.start({ address: '127.0.0.1' });
+  for (const method of ['HEAD', 'HEAD', 'GET']) {
+    const answered = await send(port, {
+      method,
+      path: '/v1/watch',
+      headers: { accept: 'text/event-stream' },
+    });
+    expect(answered.status).toBe(401);
+    expect(answered.headers['content-type']).toBe('application/problem+json');
+    expect(answered.headers['bead-refusal']).toBeUndefined();
+    expect(answered.headers['content-length']).toBe(String(Buffer.byteLength(NO_CREDENTIAL)));
+    expect(answered.body).toBe(method === 'HEAD' ? '' : NO_CREDENTIAL);
+  }
+  expect(requests).toBe(3);
+  expect(reported).toEqual([]);
+  await until(() => {
+    return memory.clients.length === 0;
+  });
+});
+
 // the requests pipelined behind a call in one write: past one read of Node's, so that its socket's
 // read stops and resumes
 const PIPELINED = 6_000;

@@ -13,6 +13,19 @@ namespace Bead.Tests;
 /// </summary>
 public sealed class PayloadsTests
 {
+    [Fact]
+    public void Refuses_non_finite_numbers_in_each_JSON_number_formatter()
+    {
+        foreach (var value in new[] { double.NaN, double.PositiveInfinity, double.NegativeInfinity })
+        {
+            Assert.Equal("not a finite number", RefusalOf(() => { return Payloads.NumberText(value); }));
+        }
+        foreach (var value in new[] { float.NaN, float.PositiveInfinity, float.NegativeInfinity })
+        {
+            Assert.Equal("not a finite number", RefusalOf(() => { return Payloads.NumberText(value); }));
+        }
+    }
+
     // constants
 
     private static readonly TimeSpan Second = TimeSpan.FromSeconds(1);

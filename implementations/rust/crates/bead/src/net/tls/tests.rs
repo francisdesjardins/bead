@@ -4,6 +4,19 @@
 use super::*;
 use crate::testing::tls::pki;
 
+#[test]
+fn refuses_a_tls_private_key_whose_pem_label_is_valid_and_whose_der_is_not() {
+    for label in ["PRIVATE KEY", "EC PRIVATE KEY", "RSA PRIVATE KEY"] {
+        let tls = tls_of(
+            (None, of("client-chain.pem")),
+            Some(format!(
+                "-----BEGIN {label}-----\nAAAA\n-----END {label}-----\n"
+            )),
+        );
+        assert_eq!(refusal_of(&tls), "key reads as no key");
+    }
+}
+
 // the PKI's file `name`; each one read, as what reads below holds
 fn of(name: &str) -> Option<String> {
     pki(name).ok()

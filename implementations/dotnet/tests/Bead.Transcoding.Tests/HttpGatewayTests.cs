@@ -443,6 +443,49 @@ public sealed class HttpGatewayTests
         await Until(() => { return service.Memory.ConnectionHandles.Count == 0; });
     }
 
+    [Fact]
+    public async Task Answers_a_refused_HEAD_subscription_with_an_empty_problem_response_and_frees_its_place()
+    {
+        await using var memory = new MemoryTransportServer();
+        await memory.Start();
+        await using var gateway = new HttpGateway(Exchanges.OptionsOf(memory, null) with
+        {
+            Heartbeat = Timeout.InfiniteTimeSpan,
+            MaximumExchanges = 1,
+            MaximumConnectionsPerAddress = 1,
+        });
+        var reported = ReportedBy(gateway);
+        var requests = 0;
+        memory.Message += (message, connectionHandle) =>
+        {
+            var envelope = EnvelopeCodec.ReadEnvelope(message.Bytes.Span, new EnvelopeReadOptions { Side = RouterSide.Server });
+            if (envelope?.Header is RequestHeader header)
+            {
+                Interlocked.Increment(ref requests);
+                var failure = new Envelope { Header = new FailureHeader { CallId = header.CallId }, Failure = Failure.OfProtocol(ProtocolCode.SessionRequired) };
+                _ = memory.Send(new TransportMessage(EnvelopeCodec.WriteEnvelope(failure), false), connectionHandle);
+            }
+        };
+        var address = await gateway.Start(new HttpGatewayStartOptions { Address = "127.0.0.1", FindOpenPort = true, CancellationToken = Cancelled });
+        using var client = new HttpClient { BaseAddress = new Uri($"http://127.0.0.1:{address.Port}") };
+        const string Problem = "{\"code\":32,\"scope\":\"protocol\",\"status\":401,\"title\":\"SESSION_REQUIRED\",\"type\":\"tag:francisdesjardins.ca,2026:bead/SESSION_REQUIRED\"}";
+
+        foreach (var method in new[] { HttpMethod.Head, HttpMethod.Head, HttpMethod.Get })
+        {
+            using var request = new HttpRequestMessage(method, "/v1/watch");
+            request.Headers.Accept.ParseAdd("text/event-stream");
+            using var answered = await client.SendAsync(request, Cancelled);
+            Assert.Equal(HttpStatusCode.Unauthorized, answered.StatusCode);
+            Assert.Equal("application/problem+json", answered.Content.Headers.ContentType?.MediaType);
+            Assert.False(answered.Headers.Contains("bead-refusal"));
+            Assert.Equal(Encoding.UTF8.GetByteCount(Problem), answered.Content.Headers.ContentLength);
+            Assert.Equal(method == HttpMethod.Head ? "" : Problem, await answered.Content.ReadAsStringAsync(Cancelled));
+        }
+        Assert.Equal(3, requests);
+        Assert.Empty(reported);
+        await Until(() => { return memory.ConnectionHandles.Count == 0; });
+    }
+
 
     [Fact]
     public async Task Drops_on_its_own_listener_a_response_its_reader_stalls_past_its_deadline_reported()

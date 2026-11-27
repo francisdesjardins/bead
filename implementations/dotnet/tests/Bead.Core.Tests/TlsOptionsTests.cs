@@ -10,6 +10,18 @@ namespace Bead.Core.Tests;
 /// </summary>
 public sealed class TlsOptionsTests
 {
+    [Fact]
+    public void Refuses_a_TLS_private_key_whose_PEM_label_is_valid_and_whose_DER_is_not()
+    {
+        foreach (var label in new[] { "PRIVATE KEY", "EC PRIVATE KEY", "RSA PRIVATE KEY" })
+        {
+            Assert.Equal("key reads as no key", Refusal(Pki.Client() with
+            {
+                Key = $"-----BEGIN {label}-----\nAAAA\n-----END {label}-----\n",
+            }));
+        }
+    }
+
     // helpers
 
     // what a client takes it as, or the words it is refused with, its parameter checked
