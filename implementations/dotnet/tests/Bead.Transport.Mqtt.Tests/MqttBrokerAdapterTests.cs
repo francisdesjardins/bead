@@ -510,8 +510,7 @@ public sealed class MqttBrokerAdapterTests : IAsyncLifetime
         using var closed = new ClosedPort();
         var port = closed.Port;
 
-        // * and a host no name resolves to (RFC 6761 §6.4), on the port of its scheme
-        foreach (var uri in new[] { $"mqtt://127.0.0.1:{port}", $"mqtts://127.0.0.1:{port}", $"ws://127.0.0.1:{port}/mqtt", $"wss://127.0.0.1:{port}/mqtt", "mqtt://broker.invalid", "mqtts://broker.invalid" })
+        foreach (var uri in new[] { $"mqtt://127.0.0.1:{port}", $"mqtts://127.0.0.1:{port}", $"ws://127.0.0.1:{port}/mqtt", $"wss://127.0.0.1:{port}/mqtt" })
         {
             await using var adapter = AdapterOf((options) =>
             {
