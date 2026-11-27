@@ -4,6 +4,23 @@ use std::time::SystemTime;
 use super::*;
 use crate::testing::SteppingClock;
 
+#[test]
+fn waits_out_a_heartbeat_when_its_timer_fires_before_the_ping_deadline() {
+    let clock = SteppingClock::new(SystemTime::UNIX_EPOCH);
+    let (heartbeat, _reads, heard) = beating(&clock, Duration::from_millis(100));
+    clock.tick(Duration::from_millis(100));
+    assert_eq!(*locked(&heard), vec![Some(count_of(1))]);
+    clock.tick(Duration::from_millis(49));
+    beat(&heartbeat.inner);
+    assert_eq!(*locked(&heard), vec![Some(count_of(1))]);
+    clock.tick(Duration::from_millis(50));
+    beat(&heartbeat.inner);
+    assert_eq!(*locked(&heard), vec![Some(count_of(1))]);
+    clock.tick(Duration::from_millis(1));
+    assert_eq!(*locked(&heard), vec![Some(count_of(1)), None]);
+    heartbeat.stop();
+}
+
 // what a heartbeat did, in order: a ping and its data, or a drop
 type Heard = Arc<Held<Vec<Option<Vec<u8>>>>>;
 

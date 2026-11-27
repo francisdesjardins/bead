@@ -5,7 +5,7 @@ use core::future::poll_fn;
 use core::pin::Pin;
 use core::task::{Context, Poll};
 use std::collections::VecDeque;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
 use http_body::{Frame, SizeHint};
 
@@ -138,6 +138,7 @@ struct Fixture {
     news: crate::managers::service::Notifier<TextCodec>,
     handles: Arc<Mutex<Vec<String>>>,
     reported: Arc<Mutex<Vec<String>>>,
+    refuse_news: Arc<AtomicBool>,
 }
 
 impl Fixture {
@@ -174,10 +175,21 @@ impl Fixture {
                 Arc::new(|request, response| response.result(request.payload)),
             )
             .expect("raw answered");
+        let refuse_news = Arc::new(AtomicBool::new(false));
+        let refusing = Arc::clone(&refuse_news);
         offered
             .on_notifying(
                 &service.news,
-                Arc::new(|_request, response| response.result("open".to_owned())),
+                Arc::new(move |_request, response| {
+                    if refusing.load(Ordering::SeqCst) {
+                        response.failure(&Failure::protocol(
+                            ProtocolCode::SESSION_REQUIRED,
+                            crate::constants::RouterSide::Server,
+                        ))
+                    } else {
+                        response.result("open".to_owned())
+                    }
+                }),
             )
             .expect("news answered");
         offered.offer(&server).expect("offered");
@@ -220,6 +232,7 @@ impl Fixture {
             news,
             handles,
             reported,
+            refuse_news,
         }
     }
 
@@ -1030,6 +1043,48 @@ async fn answers_a_mounted_head_that_asks_a_stream_with_an_ended_body_and_frees_
     assert_eq!(stream.status(), 200, "a second stream of its address");
     assert!(!stream.body().is_end_stream(), "a stream open");
     drop((head, stream));
+    fixture.until_drawn_none().await;
+    fixture.stop().await;
+}
+
+#[tokio::test]
+async fn answers_a_refused_head_subscription_with_an_empty_problem_response_and_frees_its_place() {
+    let fixture = Fixture::new(
+        |options| {
+            options.maximum_exchanges = Some(1);
+            options.maximum_connections_per_address = Some(1);
+            options.heartbeat = Some(NEVER);
+        },
+        false,
+    )
+    .await;
+    fixture.refuse_news.store(true, Ordering::SeqCst);
+    let problem = b"{\"code\":32,\"scope\":\"protocol\",\"status\":401,\"title\":\"SESSION_REQUIRED\",\"type\":\"tag:francisdesjardins.ca,2026:bead/SESSION_REQUIRED\"}";
+
+    for method in ["HEAD", "HEAD", "GET"] {
+        let request = mounted(
+            (method, "/v1/news"),
+            (
+                &[("accept", EVENT_STREAM_MEDIA_TYPE)],
+                Handed {
+                    frames: VecDeque::new(),
+                    is_end_stream: true,
+                    exact: Some(0),
+                },
+            ),
+        );
+        let answer = fixture.gateway.answer(request, None).await;
+        assert_eq!(answer.status(), 401);
+        assert_eq!(answer.headers()["content-type"], "application/problem+json");
+        assert!(!answer.headers().contains_key("bead-refusal"));
+        assert_eq!(
+            answer.headers()["content-length"],
+            problem.len().to_string()
+        );
+        let body = body_of(answer).await;
+        assert_eq!(body, if method == "HEAD" { &b""[..] } else { problem });
+    }
+    assert_eq!(fixture.reported(), Vec::<String>::new());
     fixture.until_drawn_none().await;
     fixture.stop().await;
 }

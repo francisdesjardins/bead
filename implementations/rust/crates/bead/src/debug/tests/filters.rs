@@ -13,6 +13,34 @@ fn spec(value: &str) -> DebugFilterSource {
     DebugFilterSource::Given(GivenFilter::Spec(value.to_owned()))
 }
 
+#[test]
+fn matches_supplementary_characters_in_a_debug_filter_and_quotes_them_in_a_refusal() {
+    for (pattern, expected) in [
+        ("get😀", vec!["get😀"]),
+        ("get😀*", vec!["get😀", "get😀Status"]),
+        ("*😀*", vec!["get😀", "get😀Status"]),
+    ] {
+        let keeper = FilterKeeper::new(spec(pattern)).expect("a filter");
+        let heard: Vec<_> = ["get😀", "get😁", "get😀Status"]
+            .into_iter()
+            .filter(|procedure_name| {
+                keeper.keeps_call(&CallAsked {
+                    direction: DebugDirection::Tx,
+                    call_type: DebugType::Request,
+                    procedure_name,
+                })
+            })
+            .collect();
+        assert_eq!(heard, expected);
+    }
+    assert_eq!(
+        parse_debug_filter("d(😀)")
+            .expect_err("not a direction")
+            .to_string(),
+        "a debug filter takes a direction among rx, tx, not \"😀\""
+    );
+}
+
 fn events() -> [CallAsked<'static>; 5] {
     [
         ("getStatus", DebugDirection::Tx, DebugType::Request),

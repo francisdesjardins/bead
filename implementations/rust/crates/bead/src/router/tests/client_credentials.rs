@@ -24,6 +24,51 @@ use crate::transport::{ClientListener, ReadyState, RouterClientTransport, Sent};
 
 const CARRIED: &str = "Bearer mF_9.B5f-4.1JqM";
 
+#[tokio::test]
+async fn reports_an_application_error_without_sending_anything() {
+    let transport = ScriptedClient::new(SteppingClock::new(super::january_first()));
+    let router = RouterClient::new(
+        Arc::<ScriptedClient>::clone(&transport),
+        &RouterClientOptions::default(),
+    )
+    .expect("a client router");
+    let reason: Arc<dyn std::error::Error + Send + Sync> =
+        Arc::new(std::io::Error::other("application error"));
+    let reported = Arc::new(Mutex::new(Vec::new()));
+    let hearing = Arc::clone(&reported);
+    router.on_error(Arc::new(move |error| {
+        if let RouterError::Other(error) = error {
+            locked(&hearing).push(Arc::clone(error));
+        }
+    }));
+
+    router.report(&RouterError::Other(Arc::clone(&reason)));
+
+    let heard = locked(&reported);
+    assert_eq!(heard.len(), 1);
+    assert!(Arc::ptr_eq(&heard[0], &reason));
+    drop(heard);
+    assert_eq!(transport.sent().len(), 0);
+}
+
+#[tokio::test]
+async fn refuses_an_empty_jwt_default_credential_as_a_client_router_is_built() {
+    let transport = ScriptedClient::new(SteppingClock::new(super::january_first()));
+    let refused = RouterClient::new(
+        Arc::<ScriptedClient>::clone(&transport),
+        &RouterClientOptions {
+            credential: Some(RequestCredential::Jwt(String::new())),
+            ..RouterClientOptions::default()
+        },
+    )
+    .expect_err("an empty default JWT");
+    assert_eq!(
+        refused.message(),
+        "a call that presents a JWT gives its token, a string"
+    );
+    assert_eq!(transport.sent().len(), 0);
+}
+
 // A WebSocket upgrade carries these bytes alone; its messages and listeners are scripted.
 #[derive(Debug)]
 struct Upgraded {
