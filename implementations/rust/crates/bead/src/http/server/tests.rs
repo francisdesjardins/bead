@@ -3793,8 +3793,7 @@ impl HandedOn {
     fn after_head(&self) -> String {
         self.text()
             .split_once("\r\n\r\n")
-            .map(|(_, rest)| rest.to_owned())
-            .unwrap_or_default()
+            .map_or_default(|(_, rest)| rest.to_owned())
     }
 }
 

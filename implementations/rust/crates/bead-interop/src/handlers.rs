@@ -187,9 +187,8 @@ fn name_of(session: Option<&CallSession>) -> Value {
 
 fn named_of(request: &Value) -> (Vec<&str>, Option<&Map<String, Value>>) {
     let given = request.as_object();
-    let mut keys: Vec<&str> = given
-        .map(|given| given.keys().map(String::as_str).collect())
-        .unwrap_or_default();
+    let mut keys: Vec<&str> =
+        given.map_or_default(|given| given.keys().map(String::as_str).collect());
 
     keys.sort_unstable();
 

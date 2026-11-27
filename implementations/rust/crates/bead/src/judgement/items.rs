@@ -84,8 +84,7 @@ impl Input<'_> {
     fn text(&self, (start, end): (usize, usize)) -> String {
         self.bytes
             .get(start..end)
-            .map(|bytes| bytes.iter().copied().map(char::from).collect())
-            .unwrap_or_default()
+            .map_or_default(|bytes| bytes.iter().copied().map(char::from).collect())
     }
 }
 

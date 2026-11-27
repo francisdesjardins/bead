@@ -618,8 +618,7 @@ impl ServerInner {
     async fn upgrade(&self, socket: &mut TcpStream, fields: &[&str]) -> io::Result<()> {
         let key = lines_of(fields, "sec-websocket-key")
             .first()
-            .map(|key| key.trim_matches([' ', '\t']).to_owned())
-            .unwrap_or_default();
+            .map_or_default(|key| key.trim_matches([' ', '\t']).to_owned());
         let accept = tungstenite::handshake::derive_accept_key(key.as_bytes());
         let answer = format!(
             "HTTP/1.1 101 Switching Protocols\r\nupgrade: websocket\r\nconnection: Upgrade\r\nsec-websocket-accept: {accept}\r\n\r\n"

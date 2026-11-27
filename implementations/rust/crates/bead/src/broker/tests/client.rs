@@ -45,11 +45,7 @@ fn data(bytes: &[u8]) -> TransportMessage {
 async fn opener_of(heard: &Heard) -> u64 {
     until(|| !heard.parcels().is_empty(), "its OPEN reaches the name").await;
 
-    heard
-        .parcels()
-        .first()
-        .map(|open| open.opener)
-        .unwrap_or_default()
+    heard.parcels().first().map_or_default(|open| open.opener)
 }
 
 // the ACCEPT its server answers the OPEN of `opener` with, its own half `HALF`

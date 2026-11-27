@@ -137,8 +137,7 @@ fn open_sessions(
                     .result(
                         stored
                             .session_token
-                            .map(|token| token.to_string())
-                            .unwrap_or_default(),
+                            .map_or_default(|token| token.to_string()),
                     )
                     .await
             })

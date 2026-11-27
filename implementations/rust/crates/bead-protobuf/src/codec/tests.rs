@@ -50,10 +50,7 @@ fn hex_of(bytes: &[u8]) -> String {
 // what a refusal says: its reason, then the field its cause names where it names one, its cause
 // whole otherwise
 fn said(refusal: &CodecRefusal) -> String {
-    let cause = refusal
-        .source()
-        .map(ToString::to_string)
-        .unwrap_or_default();
+    let cause = refusal.source().map_or_default(ToString::to_string);
     let named = cause
         .strip_prefix("a proto message leaves ")
         .and_then(|rest| rest.split_once(" unset"))

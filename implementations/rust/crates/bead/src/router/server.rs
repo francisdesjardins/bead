@@ -363,8 +363,7 @@ impl Side for ServerState {
         let released = self
             .notifications
             .pacing_of(header.call_id, connection_handle)
-            .map(|pacing| pacing.credit(header.credit_end))
-            .unwrap_or_default();
+            .map_or_default(|pacing| pacing.credit(header.credit_end));
 
         for payload in released {
             send_notification(

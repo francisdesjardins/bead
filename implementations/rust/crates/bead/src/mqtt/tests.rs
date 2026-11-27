@@ -4175,9 +4175,7 @@ async fn gives_up_a_start_a_subscription_or_a_publication_its_signal_aborts_a_pu
         Box::pin(async move {
             let answered = asking.wait_for(Option::is_some).await;
 
-            Ok(answered
-                .map(|held| held.clone().unwrap_or_default())
-                .unwrap_or_default())
+            Ok(answered.map_or_default(|held| held.clone().unwrap_or_default()))
         })
     }));
 
@@ -4335,9 +4333,7 @@ async fn fails_its_start_once_its_password_provider_outlives_its_connect_timeout
         Box::pin(async move {
             let answer = answered.wait_for(Option::is_some).await;
 
-            Ok(answer
-                .map(|held| held.clone().unwrap_or_default())
-                .unwrap_or_default())
+            Ok(answer.map_or_default(|held| held.clone().unwrap_or_default()))
         })
     }));
 

@@ -354,7 +354,7 @@ impl SessionIdentifier {
 /// The key a session is held under: empty for a connection's session.
 #[must_use]
 pub fn session_key_of(identifier: Option<&SessionIdentifier>) -> String {
-    identifier.map(SessionIdentifier::key).unwrap_or_default()
+    identifier.map_or_default(SessionIdentifier::key)
 }
 
 /// The session a call runs in, its credential resolved (spec 13.1).

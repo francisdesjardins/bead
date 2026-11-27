@@ -1376,14 +1376,11 @@ async fn play_steps(
             .get("on")
             .and_then(Value::as_str)
             .unwrap_or(ONLY_CONNECTION);
-        let unknown: Vec<&String> = step
-            .as_object()
-            .map(|step| {
-                step.keys()
-                    .filter(|key| !STEP_KEYS.contains(&key.as_str()))
-                    .collect()
-            })
-            .unwrap_or_default();
+        let unknown: Vec<&String> = step.as_object().map_or_default(|step| {
+            step.keys()
+                .filter(|key| !STEP_KEYS.contains(&key.as_str()))
+                .collect()
+        });
 
         hold(unknown.is_empty(), || {
             format!("{at}: the keys this player does not read: {unknown:?}")

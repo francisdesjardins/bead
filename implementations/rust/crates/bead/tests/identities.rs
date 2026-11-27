@@ -464,8 +464,7 @@ fn trials() -> Result<Vec<Trial>, String> {
                 let names: Vec<&str> = entry
                     .get("names")
                     .and_then(Value::as_array)
-                    .map(|names| names.iter().filter_map(Value::as_str).collect())
-                    .unwrap_or_default();
+                    .map_or_default(|names| names.iter().filter_map(Value::as_str).collect());
                 let (Some(one), Some(other)) = (names.first(), names.get(1)) else {
                     return Err("a fold names two names".into());
                 };

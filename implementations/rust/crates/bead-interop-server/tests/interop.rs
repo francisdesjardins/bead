@@ -1599,8 +1599,7 @@ async fn session(case: &Case) -> Result<(), String> {
         .client()
         .router()
         .session_token()
-        .map(|token| token.to_string())
-        .unwrap_or_default();
+        .map_or_default(|token| token.to_string());
 
     hold(
         token.len() == 22

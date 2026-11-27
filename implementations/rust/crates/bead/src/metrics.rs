@@ -1050,9 +1050,7 @@ impl MetricsRegistry {
                         .into_iter()
                         .enumerate()
                         .map(|(slot, Slot { outcome, code })| {
-                            let coded = code
-                                .map(|code| format!(",code=\"{code}\""))
-                                .unwrap_or_default();
+                            let coded = code.map_or_default(|code| format!(",code=\"{code}\""));
 
                             format!(
                                 "{}{{{labels},outcome=\"{outcome}\"{coded}}} {}",
