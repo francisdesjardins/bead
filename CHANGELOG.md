@@ -87,6 +87,11 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
     transport that names no clock as a router does, `which names none`;
   - the C# and Rust sides judge a join's clock after every rule of its types;
   - the Rust side judges a gateway's ties after every route's own rules, as the other sides do.
+- Each number a wire format's standard defines is a named constant, after its standard and section,
+  under one name on every side. That covers RFC 6455's frame head and close codes, MQTT 5's fixed
+  header, Variable Byte Integer and Reason Codes, AMQP 1.0's format codes, protobuf's wire types and
+  varint, UTF-8's and UTF-16's ranges, and RFC 8259's characters. `tools/wire-names.tsv` holds the
+  names, and each side's lint holds its modules to them.
 - **Breaking:** a router's transport names the clock it runs on, on every side. On the
   TypeScript side, `clock` is required on `IRouterServerTransportLike`,
   `IRouterClientTransportLike` and `IJoinableTransportServer`, and a join's `clock` is always
