@@ -2,7 +2,8 @@
   <!-- A consumer of the C# target's goldens: builder/test/consumer/UseDeprecated.cs, compiled with
        them by Roslyn, as a consumer's build compiles them, every use of what they mark read off the
        diagnostics, the twin of the TypeScript target's consumer, which typescript.test.ts lints; and
-       the goldens' split server class, Bead.Goldens's, refusing a resolver it does not serve. -->
+       the goldens' split server class, Bead.Goldens's, refusing a resolver it does not serve; and
+       the wire literal rule, read by Roslyn over the wire modules tools/wire-names.tsv names. -->
   <PropertyGroup>
     <!-- xUnit v3 runs its tests as a program of their own -->
     <OutputType>Exe</OutputType>
@@ -33,6 +34,11 @@
     <ProjectReference Include="../../src/Bead.Transcoding/Bead.Transcoding.csproj" />
     <!-- the goldens compiled, whose split server class a test registers a resolver on -->
     <ProjectReference Include="../Bead.Goldens/Bead.Goldens.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- the wire literal rule's cases, which WireLiteralTests reads from the source tree: never compiled -->
+    <Compile Remove="Cases/**" />
   </ItemGroup>
 
   <ItemGroup>

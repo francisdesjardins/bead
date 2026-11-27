@@ -32,6 +32,30 @@ internal static partial class EnvelopeCodec
     // the one flag of a failure's record this layout reads: the code is the procedure's own
     private const byte Application = 0x01;
 
+    /// <summary>RFC 3629 §3: the top two bits of a byte, which tell a continuation byte.</summary>
+    private const int ContinuationMask = 0xC0;
+
+    /// <summary>RFC 3629 §3: a continuation byte's top two bits, <c>10xxxxxx</c>.</summary>
+    private const int ContinuationPrefix = 0x80;
+
+    /// <summary>RFC 3629 §4: the first lead byte of a two-byte character.</summary>
+    private const byte FirstTwoByteLead = 0xC2;
+
+    /// <summary>RFC 3629 §4: the last lead byte of a two-byte character.</summary>
+    private const byte LastTwoByteLead = 0xDF;
+
+    /// <summary>RFC 3629 §4: the first lead byte of a three-byte character.</summary>
+    private const byte FirstThreeByteLead = 0xE0;
+
+    /// <summary>RFC 3629 §4: the last lead byte of a three-byte character.</summary>
+    private const byte LastThreeByteLead = 0xEF;
+
+    /// <summary>RFC 3629 §4: the first lead byte of a four-byte character.</summary>
+    private const byte FirstFourByteLead = 0xF0;
+
+    /// <summary>RFC 3629 §4: the last lead byte of a four-byte character, the last of U+10FFFF.</summary>
+    private const byte LastFourByteLead = 0xF4;
+
     // helpers
 
     // a failure of `envelopeMalformed` for bytes after the header of a kind that carries none, a
@@ -48,7 +72,7 @@ internal static partial class EnvelopeCodec
     // is nothing to continue
     private static bool IsContinuation(ReadOnlySpan<byte> bytes, int index)
     {
-        return index < bytes.Length && (bytes[index] & 0xC0) == 0x80;
+        return index < bytes.Length && (bytes[index] & ContinuationMask) == ContinuationPrefix;
     }
 
     // the bytes of the character `lead` starts, as UTF-8 writes one (RFC 3629, section 4): 2 from C2
@@ -57,9 +81,9 @@ internal static partial class EnvelopeCodec
     {
         return lead switch
         {
-            >= 0xC2 and <= 0xDF => 2,
-            >= 0xE0 and <= 0xEF => 3,
-            >= 0xF0 and <= 0xF4 => 4,
+            >= FirstTwoByteLead and <= LastTwoByteLead => 2,
+            >= FirstThreeByteLead and <= LastThreeByteLead => 3,
+            >= FirstFourByteLead and <= LastFourByteLead => 4,
             _ => 1,
         };
     }

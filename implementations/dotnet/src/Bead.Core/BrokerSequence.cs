@@ -215,14 +215,14 @@ internal sealed class BrokerParts(BrokerPartsBounds bounds, Action late)
         {
             Stop();
 
-            return new BrokerPartTaking(null, null, (1002, "a part past the first of an envelope carries a credential"));
+            return new BrokerPartTaking(null, null, (BrokerParcelCodes.ProtocolError, "a part past the first of an envelope carries a credential"));
         }
 
         if (_held.Count + carried.Length > bounds.MaximumEnvelopePartsBytes)
         {
             Stop();
 
-            return new BrokerPartTaking(null, null, (1009, string.Create(CultureInfo.InvariantCulture, $"an envelope's parts would pass maximumEnvelopePartsBytes, {FailureException.ByteCountOf(bounds.MaximumEnvelopePartsBytes)}")));
+            return new BrokerPartTaking(null, null, (BrokerParcelCodes.MessageTooBig, string.Create(CultureInfo.InvariantCulture, $"an envelope's parts would pass maximumEnvelopePartsBytes, {FailureException.ByteCountOf(bounds.MaximumEnvelopePartsBytes)}")));
         }
 
         // * each part charged, the last among them, until its envelope is whole
@@ -230,7 +230,7 @@ internal sealed class BrokerParts(BrokerPartsBounds bounds, Action late)
         {
             Stop();
 
-            return new BrokerPartTaking(null, null, (4000, string.Create(CultureInfo.InvariantCulture, $"a part would pass its participant's heldBytesBudget, {FailureException.ByteCountOf(bounds.Budget.Budget)}")));
+            return new BrokerPartTaking(null, null, (BrokerParcelCodes.Lost, string.Create(CultureInfo.InvariantCulture, $"a part would pass its participant's heldBytesBudget, {FailureException.ByteCountOf(bounds.Budget.Budget)}")));
         }
 
         if (_firstAt is null)

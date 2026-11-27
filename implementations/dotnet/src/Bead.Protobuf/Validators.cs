@@ -60,6 +60,20 @@ public interface IViolationSink
 /// </summary>
 public static class Validators
 {
+    // constants
+
+    /// <summary>RFC 2781 §2.2: the first high surrogate, the first of the surrogates.</summary>
+    private const int FirstHighSurrogate = 0xD800;
+
+    /// <summary>RFC 2781 §2.2: the last low surrogate, the last of the surrogates.</summary>
+    private const int LastLowSurrogate = 0xDFFF;
+
+    /// <summary>RFC 2781 §2.1: the first code point past the Basic Multilingual Plane, U+10000.</summary>
+    private const int FirstSupplementary = 0x10000;
+
+    // the surrogates' count, every unit from the first high to the last low
+    private const int Surrogates = LastLowSurrogate + 1 - FirstHighSurrogate;
+
     // helpers
 
     // strings by their code points (spec 18.5): an ordinal comparison of UTF-16 code units but
@@ -82,12 +96,12 @@ public static class Validators
     // a UTF-16 unit's place among code points: a surrogate after every unit below U+10000
     private static int OrderOf(char unit)
     {
-        if (unit < 0xD800)
+        if (unit < FirstHighSurrogate)
         {
             return unit;
         }
 
-        return unit >= 0xE000 ? unit - 0x800 : unit + 0x2000;
+        return unit > LastLowSurrogate ? unit - Surrogates : unit + (FirstSupplementary - Surrogates - FirstHighSurrogate);
     }
 
     // definition

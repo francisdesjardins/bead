@@ -30,17 +30,32 @@ internal enum MqttAcknowledgementVerdict
 /// </summary>
 internal static class MqttPackets
 {
-    /// <summary>A PUBLISH's fixed header's packet type (MQTT 5.0 §2.1.2).</summary>
+    /// <summary>MQTT 5.0 §2.1.2, Table 2-1: a PUBLISH's packet type.</summary>
     public const int Publish = 3;
 
-    /// <summary>A PUBACK's fixed header's packet type.</summary>
+    /// <summary>MQTT 5.0 §2.1.2, Table 2-1: a PUBACK's packet type.</summary>
     public const int PubAck = 4;
 
-    /// <summary>A SUBACK's fixed header's packet type.</summary>
+    /// <summary>MQTT 5.0 §2.1.2, Table 2-1: a SUBACK's packet type.</summary>
     public const int SubAck = 9;
 
-    /// <summary>An UNSUBACK's fixed header's packet type.</summary>
+    /// <summary>MQTT 5.0 §2.1.2, Table 2-1: an UNSUBACK's packet type.</summary>
     public const int UnsubAck = 11;
+
+    /// <summary>MQTT 5.0 §2.1.2: where a fixed header's first byte holds its packet type, its high four bits.</summary>
+    public const int PacketTypeShift = 4;
+
+    /// <summary>MQTT 5.0 §1.5.5: a Variable Byte Integer's continuation bit, set on each byte but its last.</summary>
+    public const int ContinuationBit = 0x80;
+
+    /// <summary>MQTT 5.0 §1.5.5: the seven bits of a Variable Byte Integer's byte that carry its digit.</summary>
+    public const int DigitMask = 0x7F;
+
+    /// <summary>MQTT 5.0 §1.5.5: the most bytes a Variable Byte Integer takes.</summary>
+    public const int LongestVariableByteInteger = 4;
+
+    /// <summary>MQTT 5.0 §2.4: the first Reason Code that tells a failure.</summary>
+    public const int FirstFailure = 0x80;
 
     // ! the tables of MQTT 5.0, code for code, which spec/vectors.json's mqttAcknowledgementCodes
     // holds: PUBACK §3.4.2.1, SUBACK §3.9.3 Table 3-8, UNSUBACK §3.11.3 Table 3-9
@@ -63,6 +78,7 @@ internal static class MqttPackets
     /// <summary>The bytes of a Variable Byte Integer of <paramref name="value"/> (MQTT 5.0 §1.5.5).</summary>
     public static int WidthOf(long value)
     {
+        // the widths as MQTT 5.0 §1.5.5's Table 1-1 prints them
         if (value < 128)
         {
             return 1;
@@ -168,7 +184,7 @@ internal static class MqttPackets
             return MqttAcknowledgementVerdict.Named;
         }
 
-        return code >= 0x80 ? MqttAcknowledgementVerdict.Refusal : MqttAcknowledgementVerdict.Unreadable;
+        return code >= FirstFailure ? MqttAcknowledgementVerdict.Refusal : MqttAcknowledgementVerdict.Unreadable;
     }
 
     /// <summary>
@@ -188,7 +204,7 @@ internal static class MqttPackets
             return null;
         }
 
-        var type = packet[0] >> 4;
+        var type = packet[0] >> PacketTypeShift;
 
         if (type is not (PubAck or SubAck or UnsubAck))
         {
@@ -250,9 +266,9 @@ internal static class MqttPackets
             var digit = body[at];
             var digits = at - Identifier + 1;
 
-            properties |= (digit & 0x7F) << (7 * (digits - 1));
+            properties |= (digit & DigitMask) << (7 * (digits - 1));
 
-            if ((digit & 0x80) != 0)
+            if ((digit & ContinuationBit) != 0)
             {
                 // ! its body's last byte first: a count of 0 though it is the fourth digit
                 if (at + 1 == body.Length)
@@ -260,7 +276,7 @@ internal static class MqttPackets
                     return (0, body.Length);
                 }
 
-                if (digits == 4)
+                if (digits == LongestVariableByteInteger)
                 {
                     return null;
                 }
@@ -290,11 +306,11 @@ internal static class MqttPackets
     {
         var value = 0;
 
-        for (var index = 0; index < 4 && index < bytes.Length; index++)
+        for (var index = 0; index < LongestVariableByteInteger && index < bytes.Length; index++)
         {
-            value |= (bytes[index] & 0x7F) << (7 * index);
+            value |= (bytes[index] & DigitMask) << (7 * index);
 
-            if ((bytes[index] & 0x80) == 0)
+            if ((bytes[index] & ContinuationBit) == 0)
             {
                 return (value, index + 1);
             }

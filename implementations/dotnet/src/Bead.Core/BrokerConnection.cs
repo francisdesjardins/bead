@@ -266,7 +266,7 @@ internal sealed class BrokerConnection
 
         if (_heldBytes + message.Bytes.Length > bound)
         {
-            Lose((4000, string.Create(CultureInfo.InvariantCulture, $"what it holds for its router, paused, would pass maximumHeldEnvelopeBytes, {FailureException.ByteCountOf(bound)}")));
+            Lose((BrokerParcelCodes.Lost, string.Create(CultureInfo.InvariantCulture, $"what it holds for its router, paused, would pass maximumHeldEnvelopeBytes, {FailureException.ByteCountOf(bound)}")));
 
             return;
         }
@@ -298,7 +298,7 @@ internal sealed class BrokerConnection
                 {
                     if (State == BrokerConnectionState.Open)
                     {
-                        End((4001, false, null));
+                        End((BrokerParcelCodes.Unanswered, false, null));
                     }
                 });
             },
@@ -345,7 +345,7 @@ internal sealed class BrokerConnection
         if (parcel.Layout != BrokerParcels.Layout)
         {
             if (isDebugging) { TraceReceive(parcel, (incoming.Bytes, ParcelVerdict.Taken, incoming.Flags)); }
-            Lose((1002, $"a parcel of a layout to come, {BrokerParcels.HexOf(parcel.Layout)}"));
+            Lose((BrokerParcelCodes.ProtocolError, $"a parcel of a layout to come, {BrokerParcels.HexOf(parcel.Layout)}"));
 
             return;
         }
@@ -383,7 +383,7 @@ internal sealed class BrokerConnection
 
         if (_parts.HeldBytes > 0 && parcel.Kind != BrokerParcelKinds.Data)
         {
-            Lose((1002, $"{BrokerParcels.KindNamed(parcel.Kind)} between an envelope's parts"));
+            Lose((BrokerParcelCodes.ProtocolError, $"{BrokerParcels.KindNamed(parcel.Kind)} between an envelope's parts"));
 
             return;
         }
@@ -405,12 +405,12 @@ internal sealed class BrokerConnection
                 break;
 
             case BrokerParcelKinds.Close:
-                TakeClose(parcel.Code == 1000);
+                TakeClose(parcel.Code == BrokerParcelCodes.NormalClosure);
 
                 break;
 
             default:
-                Lose((1002, $"{BrokerParcels.KindNamed(parcel.Kind)} on a connection open"));
+                Lose((BrokerParcelCodes.ProtocolError, $"{BrokerParcels.KindNamed(parcel.Kind)} on a connection open"));
 
                 break;
         }
@@ -445,7 +445,7 @@ internal sealed class BrokerConnection
             return;
         }
 
-        Lose((1002, $"a parcel that does not read: {unread.Why}"));
+        Lose((BrokerParcelCodes.ProtocolError, $"a parcel that does not read: {unread.Why}"));
     }
 
     /// <summary>
@@ -515,7 +515,7 @@ internal sealed class BrokerConnection
         // no gap before it
         if (parcel.Kind != BrokerParcelKinds.Close && _unsent + bytes.Length > _setup.MaximumUnsentBytes)
         {
-            Lose((4000, string.Create(CultureInfo.InvariantCulture, $"what waits for its broker would pass maximumUnsentBytes, {FailureException.ByteCountOf(_setup.MaximumUnsentBytes)}")));
+            Lose((BrokerParcelCodes.Lost, string.Create(CultureInfo.InvariantCulture, $"what waits for its broker would pass maximumUnsentBytes, {FailureException.ByteCountOf(_setup.MaximumUnsentBytes)}")));
 
             return null;
         }
@@ -600,7 +600,7 @@ internal sealed class BrokerConnection
 
             if (_parts.IsLate())
             {
-                Lose((4000, _parts.LateOf()));
+                Lose((BrokerParcelCodes.Lost, _parts.LateOf()));
             }
             else
             {
@@ -636,7 +636,7 @@ internal sealed class BrokerConnection
                 return false;
 
             case BrokerTaking.Gap:
-                Lose((4000, _sequence.GapOf(sequence)));
+                Lose((BrokerParcelCodes.Lost, _sequence.GapOf(sequence)));
 
                 return false;
 
@@ -650,7 +650,7 @@ internal sealed class BrokerConnection
         // ! nothing is carried toward an opener (spec 15.22)
         if (_setup.Owner.IsOpener && parcel.Credential is not null)
         {
-            Lose((1002, "a DATA toward its client carries a credential, which no server's does"));
+            Lose((BrokerParcelCodes.ProtocolError, "a DATA toward its client carries a credential, which no server's does"));
 
             return;
         }

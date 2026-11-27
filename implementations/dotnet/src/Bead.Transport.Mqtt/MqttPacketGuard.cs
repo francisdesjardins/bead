@@ -225,9 +225,6 @@ internal sealed class ReceivingAdapter(IMqttChannelAdapter inner, MqttPacketGuar
 /// </summary>
 internal sealed class MqttPacketGuard(IMqttChannel inner, MqttPacketGuardOptions options) : IMqttChannel
 {
-    // the widest fixed header: its first byte and a Remaining Length of four bytes (MQTT 5.0 §1.5.5)
-    private const int WidestHeader = 5;
-
     // the fixed header read so far: its bytes, its first among them, and its Remaining Length so far
     private int _width;
     private long _length;
@@ -346,13 +343,13 @@ internal sealed class MqttPacketGuard(IMqttChannel inner, MqttPacketGuardOptions
 
             var digit = buffer[at];
 
-            _length += (long)(digit & 0x7F) << (7 * (_width - 1));
+            _length += (long)(digit & MqttPackets.DigitMask) << (7 * (_width - 1));
             _width += 1;
 
-            if ((digit & 0x80) != 0)
+            if ((digit & MqttPackets.ContinuationBit) != 0)
             {
                 // ! malformed: MQTTnet refuses it and ends the link; nothing more is judged
-                if (_width == WidestHeader)
+                if (_width - 1 == MqttPackets.LongestVariableByteInteger)
                 {
                     _isJudging = false;
 

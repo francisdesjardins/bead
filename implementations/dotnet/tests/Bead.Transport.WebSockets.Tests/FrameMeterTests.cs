@@ -13,7 +13,7 @@ public sealed class FrameMeterTests
     private static readonly TimeSpan Patience = TimeSpan.FromSeconds(10);
 
     // a masking key, as a client draws one (RFC 6455 §5.3)
-    private static readonly byte[] Key = [0x37, 0xFA, 0x21, 0x3D];
+    private static readonly byte[] MaskingKey = [0x37, 0xFA, 0x21, 0x3D];
 
     // helpers
 
@@ -53,11 +53,11 @@ public sealed class FrameMeterTests
             head.Add((byte)(0x80 | payload.Length));
         }
 
-        head.AddRange(Key);
+        head.AddRange(MaskingKey);
 
         return [.. head, .. payload.Select((octet, index) =>
         {
-            return (byte)(octet ^ Key[index % Key.Length]);
+            return (byte)(octet ^ MaskingKey[index % MaskingKey.Length]);
         })];
     }
 
@@ -267,13 +267,13 @@ public sealed class FrameMeterTests
     {
         var options = new FrameMeter.MeterOptions { MaximumMessageBytes = 64, IsServer = true };
         var meter = new FrameMeter(options);
-        byte[] head = [0x82, 0x80 | 100, .. Key];
+        byte[] head = [0x82, 0x80 | 100, .. MaskingKey];
 
         Assert.Equal(0, meter.Read(head));
         Assert.Equal(WebSocketCloseStatus.MessageTooBig, meter.Verdict?.Code);
 
         var first = FrameOf((0x02, new byte[40], false));
-        byte[] continuation = [0x80, 0x80 | 25, .. Key];
+        byte[] continuation = [0x80, 0x80 | 25, .. MaskingKey];
         var continued = new FrameMeter(options);
 
         Assert.Equal(first.Length, continued.Read([.. first, .. continuation]));
@@ -381,7 +381,7 @@ public sealed class FrameMeterTests
         // 1002 at its second byte, never whole, and charges nothing, in one read or cut at its first
         // byte: 1002, not 1013
         var charged = FrameOf((0x02, PayloadOf(364), false));
-        byte[] edge = [.. charged, 0x89, 0x80 | 126, 0x00, 0x7E, .. Key];
+        byte[] edge = [.. charged, 0x89, 0x80 | 126, 0x00, 0x7E, .. MaskingKey];
 
         foreach (var cut in new[] { edge.Length, charged.Length + 1 })
         {
@@ -405,7 +405,7 @@ public sealed class FrameMeterTests
         byte[] past = [.. FrameOf((0x02, PayloadOf(464), false)), .. FrameOf((0x83, [0x78], false))];
 
         Assert.Equal(0, castMeter.Read(past));
-        Assert.Equal(FrameVerdict.TryAgainLater, castMeter.Verdict?.Code);
+        Assert.Equal(WebSocketFrame.TryAgainLater, castMeter.Verdict?.Code);
         Assert.Equal(0, castOff.Charged);
     }
 

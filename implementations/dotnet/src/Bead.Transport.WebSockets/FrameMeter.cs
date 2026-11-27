@@ -22,13 +22,6 @@ internal sealed class FrameMeter
     /// <summary>What each head of a message partway is charged once whole, beyond its bytes (spec 15.12).</summary>
     public const int PerFrame = 128;
 
-    // a WebSocket's opcodes (RFC 6455 §5.2)
-    private const int Continuation = 0x0;
-    private const int Text = 0x1;
-    private const int Binary = 0x2;
-    private const int FirstControl = 0x8;
-    private const int LastControl = 0xA;
-
     private readonly MeterOptions _options;
     private readonly MessageBudget.Holder? _holder;
 
@@ -47,7 +40,7 @@ internal sealed class FrameMeter
 
     // ! the parse, its reader's alone: one read at a time
     // the head under way, its bytes so far, and how long it is once its second byte came
-    private readonly byte[] _head = new byte[14];
+    private readonly byte[] _head = new byte[WebSocketFrame.LongestHeadBytes];
     private int _headCount;
     private int _headLength = 2;
     private int _lengthEnd = 2;
@@ -328,7 +321,7 @@ internal sealed class FrameMeter
 
     private static bool IsControl(int opcode)
     {
-        return opcode >= FirstControl;
+        return (opcode & WebSocketFrame.ControlBit) != 0;
     }
 
     // where the frame under way began in this read: at none when it began in an earlier one
@@ -394,8 +387,8 @@ internal sealed class FrameMeter
 
         if (_headCount == 2)
         {
-            var isMasked = (octet & 0x80) != 0;
-            var short7 = octet & 0x7F;
+            var isMasked = (octet & WebSocketFrame.MaskBit) != 0;
+            var short7 = octet & WebSocketFrame.PayloadLengthMask;
 
             if (isMasked != _options.IsServer)
             {
@@ -404,13 +397,13 @@ internal sealed class FrameMeter
 
             // ! a control frame's length is judged in its 7 bits: a longer form, whatever its value,
             // breaks RFC 6455 §5.2's minimal form, and every side refuses it alike
-            if (IsControl(_opcode) && short7 > 125)
+            if (IsControl(_opcode) && short7 > WebSocketFrame.LongestControlPayload)
             {
                 return FrameVerdict.Forbidden("a control frame longer than 125 bytes");
             }
 
-            _lengthEnd = 2 + (short7 == 126 ? 2 : short7 == 127 ? 8 : 0);
-            _headLength = _lengthEnd + (isMasked ? 4 : 0);
+            _lengthEnd = 2 + (short7 == WebSocketFrame.ExtendedLength16 ? 2 : short7 == WebSocketFrame.ExtendedLength64 ? 8 : 0);
+            _headLength = _lengthEnd + (isMasked ? WebSocketFrame.MaskingKeyBytes : 0);
 
             if (_lengthEnd == 2)
             {
@@ -422,7 +415,7 @@ internal sealed class FrameMeter
                 }
             }
         }
-        else if (_headCount == 3 && _lengthEnd == 10 && (octet & 0x80) != 0)
+        else if (_headCount == 3 && _lengthEnd == 10 && (octet & WebSocketFrame.LengthTopBit) != 0)
         {
             // a 64-bit length's top bit is judged at its first byte, the head's third (RFC 6455 §5.2)
             return FrameVerdict.Forbidden("a 64-bit length with its top bit set");
@@ -461,18 +454,18 @@ internal sealed class FrameMeter
     // maximumMessageFrames, its count drawn as its frame begins; a message begins at its first frame
     private FrameVerdict? First(byte octet)
     {
-        _opcode = octet & 0x0F;
-        _isFinal = (octet & 0x80) != 0;
+        _opcode = octet & WebSocketFrame.OpcodeMask;
+        _isFinal = (octet & WebSocketFrame.FinBit) != 0;
         _headLength = 2;
         _lengthEnd = 2;
 
         // ! no extension is negotiated (spec 15.2): every reserved bit is 0
-        if ((octet & 0x70) != 0)
+        if ((octet & WebSocketFrame.ReservedMask) != 0)
         {
             return FrameVerdict.Forbidden("a reserved bit set");
         }
 
-        if (_opcode is > Binary and < FirstControl or > LastControl)
+        if (_opcode is not (WebSocketFrame.Continuation or WebSocketFrame.Text or WebSocketFrame.Binary or WebSocketFrame.Close or WebSocketFrame.Ping or WebSocketFrame.Pong))
         {
             return FrameVerdict.Forbidden(string.Create(CultureInfo.InvariantCulture, $"a reserved opcode, {_opcode}"));
         }
@@ -484,12 +477,12 @@ internal sealed class FrameMeter
             return _isFinal ? null : FrameVerdict.Forbidden("a control frame not final");
         }
 
-        if (_opcode == Continuation && !_isUnderWay)
+        if (_opcode == WebSocketFrame.Continuation && !_isUnderWay)
         {
             return FrameVerdict.Forbidden("a continuation with no message under way");
         }
 
-        if (_opcode != Continuation && _isUnderWay)
+        if (_opcode != WebSocketFrame.Continuation && _isUnderWay)
         {
             return FrameVerdict.Forbidden("a data frame that is not a continuation while a message is under way");
         }
@@ -499,7 +492,7 @@ internal sealed class FrameMeter
             return FrameVerdict.TooManyFrames(_options.MaximumMessageFrames);
         }
 
-        if (_opcode != Continuation)
+        if (_opcode != WebSocketFrame.Continuation)
         {
             Begin();
         }
@@ -723,9 +716,6 @@ internal sealed record FrameVerdict
     /// <summary>Why, in the spec's spelling.</summary>
     public required string Why { get; init; }
 
-    /// <summary>1013, Try Again Later in IANA's registry, which .NET has no name for.</summary>
-    public const WebSocketCloseStatus TryAgainLater = (WebSocketCloseStatus)1013;
-
     /// <summary>A head RFC 6455 forbids: 1002.</summary>
     public static FrameVerdict Forbidden(string rule)
     {
@@ -760,7 +750,7 @@ internal sealed record FrameVerdict
     /// <summary>A message cast off by <c>messageBytesBudget</c>: 1013.</summary>
     public static FrameVerdict CastOff(long messageBytesBudget)
     {
-        return new FrameVerdict { Of = Kind.Bound, Code = TryAgainLater, Why = $"the messages partway would pass messageBytesBudget, {FailureException.ByteCountOf(messageBytesBudget)}" };
+        return new FrameVerdict { Of = Kind.Bound, Code = WebSocketFrame.TryAgainLater, Why = $"the messages partway would pass messageBytesBudget, {FailureException.ByteCountOf(messageBytesBudget)}" };
     }
 
     /// <summary>

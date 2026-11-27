@@ -32,6 +32,9 @@ internal static class AmqpMessages
     // the Data section's descriptor
     private const int DataDescriptorBytes = 3;
 
+    /// <summary>AMQP 1.0 Types §1.6: the longest binary a <c>vbin8</c> holds, its length one octet.</summary>
+    private const int LongestVbin8 = 255;
+
     /// <summary>A topic's tokens joined by <c>.</c>, as a queue and a routing key name it (spec 15.32): <c>bead.i.ada</c>.</summary>
     public static string TopicOf(IReadOnlyList<string> topic)
     {
@@ -61,7 +64,7 @@ internal static class AmqpMessages
     /// <summary>The bytes of a <c>vbin8</c> or <c>vbin32</c>'s code and length before <paramref name="payload"/> bytes.</summary>
     public static int WidthOf(long payload)
     {
-        return payload < 256 ? 2 : 5;
+        return payload <= LongestVbin8 ? 2 : 5;
     }
 
     /// <summary>

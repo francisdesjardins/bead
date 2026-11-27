@@ -37,16 +37,19 @@ internal static class BrokerParcelKinds
     /// <summary>A broker's, as a participant's will: its incarnation gone.</summary>
     public const byte Gone = 0x09;
 
+    /// <summary>The first advisory kind (spec 15.17): from it to 0xFF, each is taken in its order and skipped.</summary>
+    public const byte FirstAdvisory = 0x80;
+
     /// <summary>Whether a kind is advisory: taken in its order and skipped, whatever it holds.</summary>
     public static bool IsAdvisory(byte kind)
     {
-        return kind >= 0x80;
+        return kind >= FirstAdvisory;
     }
 
     /// <summary>Whether a kind is one to come: a parcel of one, taken in its order, closes its connection with 1002.</summary>
     public static bool IsToCome(byte kind)
     {
-        return kind is >= 0x0A and < 0x80;
+        return kind is > Gone and < FirstAdvisory;
     }
 }
 
@@ -61,6 +64,31 @@ internal static class BrokerParcelFlags
 
     /// <summary>On an OPEN and an ACCEPT: its sender's own leg is secure (spec 15.22).</summary>
     public const byte Secure = 0x04;
+}
+
+/// <summary>
+/// The codes a CLOSE carries (spec 15.17): four of WebSocket's, under RFC 6455's names, then Bead's
+/// own two.
+/// </summary>
+internal static class BrokerParcelCodes
+{
+    /// <summary>RFC 6455 §7.4.1: 1000, Normal Closure, the connection's purpose fulfilled.</summary>
+    public const int NormalClosure = 1000;
+
+    /// <summary>RFC 6455 §7.4.1: 1001, Going Away, its end going down.</summary>
+    public const int GoingAway = 1001;
+
+    /// <summary>RFC 6455 §7.4.1: 1002, Protocol Error.</summary>
+    public const int ProtocolError = 1002;
+
+    /// <summary>RFC 6455 §7.4.1: 1009, Message Too Big, an envelope past what its end takes.</summary>
+    public const int MessageTooBig = 1009;
+
+    /// <summary>Bead's own (spec 15.17): 4000, lost, its connection given up on, a bound passed or a gap.</summary>
+    public const int Lost = 4000;
+
+    /// <summary>Bead's own (spec 15.17): 4001, unanswered, nothing of its peer come for its heartbeat (spec 15.21).</summary>
+    public const int Unanswered = 4001;
 }
 
 /// <summary>
@@ -138,6 +166,9 @@ internal static class BrokerParcels
     /// <summary>The layout this side writes and reads whole.</summary>
     public const byte Layout = 0xB1;
 
+    /// <summary>The last layout a parcel's first byte may be (spec 15.17): from <see cref="Layout"/> to it.</summary>
+    public const byte LastLayout = 0xBF;
+
     /// <summary>The bytes of every parcel's prefix.</summary>
     public const int PrefixBytes = 28;
 
@@ -154,7 +185,15 @@ internal static class BrokerParcels
     public const int LongestToken = 64;
 
     // the codes a CLOSE carries, a WebSocket's (RFC 6455 §7.4.1), and the private two
-    private static readonly int[] Codes = [1000, 1001, 1002, 1009, 4000, 4001];
+    private static readonly int[] Codes =
+    [
+        BrokerParcelCodes.NormalClosure,
+        BrokerParcelCodes.GoingAway,
+        BrokerParcelCodes.ProtocolError,
+        BrokerParcelCodes.MessageTooBig,
+        BrokerParcelCodes.Lost,
+        BrokerParcelCodes.Unanswered,
+    ];
 
     // why a body does not read as its kind's, by its length
     private const string Shorter = "a body shorter than its kind's";
@@ -173,7 +212,7 @@ internal static class BrokerParcels
     /// <summary>Whether <paramref name="layout"/> is one a parcel's first byte may be: 0xB1 to 0xBF.</summary>
     public static bool IsLayout(byte layout)
     {
-        return layout is >= 0xB1 and <= 0xBF;
+        return layout is >= Layout and <= LastLayout;
     }
 
     /// <summary>
