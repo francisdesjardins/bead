@@ -486,6 +486,19 @@ file, a key or a property was added
     pushed at once; then dispatch it on the tag, `gh workflow run image.yml --ref vX.Y.Z`. A run
     that failed once its index was pushed, at the attestation, the signature or the verification,
     takes `gh run rerun <run> --failed`: a new dispatch refuses the version the registry holds.
+12. **The libraries.** The tag also starts [`packages.yml`](../.github/workflows/packages.yml),
+    separately from the image. It packs the TypeScript tarball and all eight packable C# projects
+    at the tag's version, checks the archives' versions, writes `SHA256SUMS`, attests each archive
+    and the manifest, and attaches them to the tag's GitHub Release, creating it with generated
+    notes when needed. Rust uses a Cargo Git dependency at the tag and uploads nothing. Follow
+    `gh run list --workflow packages.yml --branch vX.Y.Z --limit 1`. If no run starts, dispatch
+    `gh workflow run packages.yml --ref vX.Y.Z -f tag=vX.Y.Z`: both the run's ref and its input must
+    name that tag. A rerun replaces the attachments and their sums. Check the release's nine
+    archives, the manifest and their proofs by the root's [Install](../README.md#install) before
+    handing it to a team. `prepare` and `tag` both print this obligation. A local packing trial
+    uses `yarn pack --out <path>.tgz` in `implementations/typescript` and
+    `dotnet pack Bead.slnx -c Release --output <folder> -p:RestoreLockedMode=true` in
+    `implementations/dotnet`, with the checkout's version and no upload.
 
 A hotfix starts from `main` with `git flow hotfix start X.Y.Z` and follows the same steps;
 `prepare` also takes every `beadc breaking` waiver out of `ci.yml`, each moot since the release

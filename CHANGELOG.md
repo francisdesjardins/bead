@@ -14,6 +14,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   and a click plays an eclipse; where the page leaves no room, the bar's own mark takes the face,
   and its link to the top plays the eclipse. The demo's mascot shows each call's end, and the
   DevTools panel's waits, listening, until a client announces itself. One module, `implementations/typescript/skin/mascot.js`, serves all three.
+- Each GitHub Release carries the TypeScript tarball and the eight C# packages, with SHA-256
+  sums and build-provenance attestations. Rust libraries are consumed by Git tag.
 
 ### Changed
 
@@ -154,7 +156,6 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - On the TypeScript and C# sides, an AMQP 1.0 adapter gives a name's first receiver no credit when
   an unsubscription met it as it attached. Its broker could send it messages before its DETACH, and
   under at most once such a message was lost.
-
 ## [0.17.0] - 2026-11-24
 
 ### Added

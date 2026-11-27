@@ -182,7 +182,7 @@ export const RULES = Object.freeze([
       '.claude/**',
       '.githooks/**',
       '.github/dependabot.yml',
-      '.github/workflows/{bench,drift,fuzz,guides,image}.yml',
+      '.github/workflows/{bench,drift,fuzz,guides,image,packages}.yml',
       'docs/decisions/**',
       'docs/guides/**',
       'docs/maintaining.md',
@@ -231,6 +231,11 @@ export const RULES = Object.freeze([
     why: "the wire formats' names, whose modules each side's lint reads",
     patterns: ['tools/wire-names.tsv'],
     areas: ['commits', 'typescript', 'dotnet', 'rust'],
+  },
+  {
+    why: 'the TypeScript release tarball and the tests of its preparation',
+    patterns: tool('pack-typescript'),
+    areas: ['commits', 'typescript'],
   },
   {
     why: 'the versions, which spec/check.py reads too',

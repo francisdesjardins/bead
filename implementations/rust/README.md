@@ -28,6 +28,13 @@ what beadc writes for it
 [decision 0051](../../docs/decisions/0051-beadc-writes-rust-each-packages-typed-shells-beside-the-messages-buffa-writes.md)'s,
 its gateway [decision 0052](../../docs/decisions/0052-the-rust-sides-gateway-is-a-feature-of-its-core-its-json-mapping-a-feature-of-its-proto-codec-and-a-head-never-holds-a-stream.md)'s.
 
+## Install
+
+Take `francisdesjardins-bead` as a Cargo Git dependency pinned to a release tag, with its library
+named `bead`. The root's [Install](../../README.md#install) gives the `Cargo.toml` line and the
+features; the protobuf crates use the same URL and tag. Commit `Cargo.lock` to pin the resolved
+commit. Rust packages are consumed through Git; the release carries no Rust archive.
+
 ## Build and test
 
 Rust 1.99.1 and edition 2024, as `rust-toolchain.toml` pins them, which rustup installs with clippy,

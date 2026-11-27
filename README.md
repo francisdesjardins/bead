@@ -48,11 +48,14 @@ This repository holds the protocol and its implementations, side by side:
   HTTP and MQTT 5, and the TypeScript and C# sides' over AMQP 1.0 too, beside a gateway whose routes
   each other side's generated HTTP client calls.
 
-**beadc's image is published; the packages are not.** At each release, beadc's image goes to
+**Each release publishes its libraries through Git and its GitHub Release.** The TypeScript tarball
+and the C# packages are attached with SHA-256 sums and build provenance; Rust is consumed by its
+Git tag ([Install](#install)). No library goes to a package registry. beadc's image goes to
 GitHub's container registry, `ghcr.io/francisdesjardins/beadc:<version>`, attested and signed, and
-a team pins it by its digest ([0055](docs/decisions/0055-beadcs-image-is-published-at-each-release-under-its-version-attested-and-signed.md)). No package goes to npm, NuGet or crates.io: the runtimes come
-from a clone at the release's tag, and their publication is ahead. Bead has not run in production,
-and before 1.0.0 a minor may break.
+a team pins it by its digest ([0055](docs/decisions/0055-beadcs-image-is-published-at-each-release-under-its-version-attested-and-signed.md)).
+Before 1.0.0, the wire, the names and the API change freely, and a minor may break. The libraries
+are published per release so that a team pins the version it builds against. Bead has not run in
+production.
 
 ## At a glance
 
@@ -285,6 +288,91 @@ The interop's blueprint is written by hand and laid out by `python spec/check.py
 members sorted as RFC 8785 sorts them, arrays by identity, integers alone, two spaces and a final
 newline.
 
+## Install
+
+Choose a version from [GitHub Releases](https://github.com/francisdesjardins/bead/releases) whose
+assets contain the libraries and `SHA256SUMS`. Replace `X.Y.Z` below with that version. Each
+project pins its release; a library's dependencies come from their own ecosystem's sources.
+
+### Check the release's archives
+
+With GitHub CLI, download the TypeScript tarball, all eight C# packages and their sums, then check
+every sum and GitHub build-provenance attestation before installing. The attestation must name this
+repository, its packages workflow and the chosen tag, on a GitHub-hosted runner:
+
+```sh
+set -eu
+gh release download vX.Y.Z --repo francisdesjardins/bead \
+  --pattern '*.tgz' --pattern '*.nupkg' --pattern SHA256SUMS --dir bead-release-X.Y.Z
+(
+  cd bead-release-X.Y.Z
+  sha256sum --check SHA256SUMS
+  for archive in *.tgz *.nupkg SHA256SUMS; do
+    gh attestation verify "$archive" --repo francisdesjardins/bead \
+      --signer-workflow francisdesjardins/bead/.github/workflows/packages.yml \
+      --source-ref refs/tags/vX.Y.Z --deny-self-hosted-runners
+  done
+)
+```
+
+`sha256sum` detects a changed archive against the manifest. The attestation binds its bytes to the
+workflow and source. Add `--source-digest <commit>` to pin verification to a commit trusted by the
+team as well as the tag. In PowerShell, `Get-FileHash <archive> -Algorithm SHA256` gives the sum to
+compare with its line in `SHA256SUMS`; the `gh attestation verify` command is the same.
+
+### TypeScript, from a tarball
+
+Node 24.9 or later. Install the checked tarball by path from the application's folder:
+
+```sh
+npm install --save-exact ./bead-release-X.Y.Z/francisdesjardins-bead-X.Y.Z.tgz
+```
+
+The release's URL also serves as an npm dependency:
+
+```sh
+npm install --save-exact https://github.com/francisdesjardins/bead/releases/download/vX.Y.Z/francisdesjardins-bead-X.Y.Z.tgz
+```
+
+The package is `@francisdesjardins/bead`; import a subpath such as
+`@francisdesjardins/bead/service`. It carries JavaScript and TypeScript declarations. Install the
+optional peer needed by the chosen features: `@bufbuild/protobuf` for protobuf and transcoding,
+`ws` for Node's WebSocket transport, `undici` for its HTTP client, `mqtt` for MQTT 5 and `rhea` for
+AMQP 1.0. A TypeScript application also takes `@types/node` and, with `ws`, `@types/ws`; include
+`"node"` in its `tsconfig.json`'s `compilerOptions.types`.
+
+### C#, from a folder feed
+
+The packages target .NET 10. Keep all the release's `.nupkg` files together: the libraries refer
+to one another at that version. From the application's folder, create a local NuGet configuration
+and add the checked archives' folder as a feed, alongside nuget.org for third-party dependencies:
+
+```sh
+dotnet new nugetconfig
+dotnet nuget add source "$PWD/bead-release-X.Y.Z" --name bead-release --configfile NuGet.Config
+dotnet add package Bead.Core --version X.Y.Z
+dotnet build
+```
+
+The eight package IDs are `Bead.Core`, `Bead.Protobuf`, `Bead.Transcoding`, `Bead.Transcoding.Http`,
+`Bead.Transport.Http`, `Bead.Transport.WebSockets`, `Bead.Transport.Mqtt` and `Bead.Transport.Amqp`.
+Add the ones the application calls; NuGet restores the others they need from the same folder.
+No Bead package is fetched from a registry.
+
+### Rust, from Git
+
+Cargo finds the named package in the repository's workspace. In the application's `Cargo.toml`:
+
+```toml
+[dependencies]
+bead = { package = "francisdesjardins-bead", git = "https://github.com/francisdesjardins/bead", tag = "vX.Y.Z" }
+```
+
+Choose features such as `websocket`, `http`, `mqtt`, `transcoding` or `gateway` on this dependency
+as needed. `francisdesjardins-bead-protobuf` and `francisdesjardins-bead-protobuf-build` use the
+same Git URL and tag. Commit `Cargo.lock` to pin the resolved commit. Rust 1.99.1 or later and
+edition 2024 are required; no Rust archive is attached to the release.
+
 ## TypeScript
 
 In `implementations/typescript`. Node 24.9 or later. Yarn 4 is vendored under `.yarn/releases/`, and
@@ -298,7 +386,8 @@ yarn check        # types, lint and its plugin's cases, format, comment budget, 
 yarn test         # the unit tests, and the interop against the C# server
 ```
 
-The package is `@francisdesjardins/bead`, private; its `exports` point at the sources. What they
+The package is `@francisdesjardins/bead`; its checkout keeps `private: true` and its `exports`
+point at the sources. `yarn pack` builds JavaScript and declarations under `dist/` for the tarball. What they
 export, each declaration with its members, is pinned to `surface.txt`, and an options parameter is
 required exactly when a member of its options is: `yarn check` holds both, through TypeScript 7's
 checker, and `yarn surface:write` writes the list anew, its diff the change's to review. Its
@@ -1224,11 +1313,29 @@ git commit -m "ci: take out the waivers v0.2.0 makes moot" -- .github/workflows/
 git push --atomic origin main develop v0.2.0 spec-v0.2.0 debugging-v0.1.0 :release/0.2.0
 gh run list --workflow image.yml --limit 1     # beadc's image, published from v0.2.0
 gh workflow run image.yml --ref v0.2.0         # on the tag, only if no run started
+gh run list --workflow packages.yml --branch v0.2.0 --limit 1
+gh workflow run packages.yml --ref v0.2.0 -f tag=v0.2.0   # only if no run started
 ```
 
 The tag `v*` starts [`image.yml`](.github/workflows/image.yml), which publishes beadc's image under
 the release's version, attested and signed ([0055](docs/decisions/0055-beadcs-image-is-published-at-each-release-under-its-version-attested-and-signed.md)); GitHub starts no run when more than three tags
 are pushed at once, and the release then dispatches it on the tag.
+
+The same tag starts [`packages.yml`](.github/workflows/packages.yml). It packs the TypeScript
+tarball and every packable C# project in Release, checks every archive's version against the tag,
+writes `SHA256SUMS`, attests the archives and the manifest, and uploads them to the tag's GitHub
+Release. It creates the Release with generated notes when none is present. Rust is consumed by
+Git tag. This workflow is separate from the image's because the libraries are release attachments
+and need no container registry permissions. Both workflows run on the tag's own commit and refuse
+a tag off `main`.
+
+After the push, check that the packages run succeeds and the release holds all nine archives,
+`SHA256SUMS` and their attestations ([Install](#install)). If no run starts, dispatch it on the tag
+with the matching `tag` input. A rerun replaces its release attachments, including the sums; check
+their proofs again. To try the archives locally, run `yarn pack --out <path>.tgz` from
+`implementations/typescript` and `dotnet pack Bead.slnx -c Release --output <folder>
+-p:RestoreLockedMode=true` from `implementations/dotnet`; each uses the checkout's version and
+publishes nothing.
 
 Before `prepare`, the release moves by hand the pins of beadc's image and its lint: the Dockerfile
 frontend's and the distroless base's (`BASE_DIGEST` and `DEBUG_DIGEST`) digests in `builder/Dockerfile`, with
