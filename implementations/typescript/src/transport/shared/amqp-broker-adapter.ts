@@ -28,6 +28,7 @@ import {
   MAXIMUM_MESSAGE_SIZE,
   messageBytes,
   queueAddressOf,
+  SECTION,
   topicOf,
 } from './amqp-messages';
 import {
@@ -237,15 +238,14 @@ const LONGEST_IDLE_TIMEOUT = 1_073_741_823;
 // the sessions beside its names: its inbox's, its two sending ones, and one for its management
 const SESSIONS_BESIDE_NAMES = 4;
 
-// a Data section's described type, the one body a parcel is (AMQP 1.0 Messaging §3.2.6)
-const DATA_SECTION = 0x75;
-
 const ALL_CAPABILITIES = Object.freeze({ expiry: true, groups: true, will: false });
 
 const encoder = new TextEncoder();
 
 // the constructor rhea decodes each body section as, so that a value that merely looks like one is none
-const SECTION = Object.getPrototypeOf(rhea.message.data_section(Buffer.alloc(0))) as object;
+const SECTION_PROTOTYPE = Object.getPrototypeOf(
+  rhea.message.data_section(Buffer.alloc(0))
+) as object;
 
 // helpers
 
@@ -278,8 +278,9 @@ const payloadOf = (message: unknown): Uint8Array | undefined => {
   if (
     body === null ||
     typeof body !== 'object' ||
-    Object.getPrototypeOf(body) !== SECTION ||
-    (body as { typecode?: unknown }).typecode !== DATA_SECTION ||
+    Object.getPrototypeOf(body) !== SECTION_PROTOTYPE ||
+    // a Data section's described type, the one body a parcel is (AMQP 1.0 Messaging §3.2.6)
+    (body as { typecode?: unknown }).typecode !== SECTION.DATA ||
     (body as { multiple?: unknown }).multiple === true
   ) {
     return undefined;

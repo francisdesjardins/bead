@@ -14,14 +14,14 @@ use crate::websocket::budget::{MessageBounds, MessageBudget};
 
 const PATIENCE: core::time::Duration = core::time::Duration::from_secs(10);
 
-const KEY: [u8; 4] = [0x37, 0xfa, 0x21, 0x3d];
+const MASKING_KEY: [u8; 4] = [0x37, 0xfa, 0x21, 0x3d];
 
 // a frame as a client writes it: `fin` and `opcode`, its length in 7, 16 or 64 bits as it needs,
-// masked by KEY
+// masked by MASKING_KEY
 fn masked(opcode: u8, (payload, fin): (&[u8], bool)) -> Vec<u8> {
     let mut frame = head_of(
         (fin, opcode),
-        (u64::try_from(payload.len()).unwrap(), Some(KEY)),
+        (u64::try_from(payload.len()).unwrap(), Some(MASKING_KEY)),
     )
     .as_bytes()
     .to_vec();
@@ -30,7 +30,7 @@ fn masked(opcode: u8, (payload, fin): (&[u8], bool)) -> Vec<u8> {
         payload
             .iter()
             .enumerate()
-            .map(|(index, byte)| byte ^ KEY[index % 4]),
+            .map(|(index, byte)| byte ^ MASKING_KEY[index % 4]),
     );
     frame
 }
@@ -216,7 +216,7 @@ fn splits_a_data_frame_past_64_kib_into_frames_of_64_kib_at_most_each_masked_by_
         "frames of 64 KiB at most, the first its opcode, the last alone final"
     );
     assert!(
-        pieces.iter().all(|(_, _, key, _)| *key == KEY),
+        pieces.iter().all(|(_, _, key, _)| *key == MASKING_KEY),
         "each masked by its key turned by an offset of 64 KiB, which turns it by none"
     );
     assert_eq!(
@@ -235,12 +235,12 @@ fn splits_a_data_frame_past_64_kib_into_frames_of_64_kib_at_most_each_masked_by_
 
     // * a key turned by an offset that is no multiple of 4 unmasks there as the frame's key does
     for offset in 0..8 {
-        let turned = turned(KEY, offset);
+        let turned = turned(MASKING_KEY, offset);
 
         for index in 0..8 {
             assert_eq!(
                 turned[index % 4],
-                KEY[(usize::try_from(offset).unwrap() + index) % 4],
+                MASKING_KEY[(usize::try_from(offset).unwrap() + index) % 4],
                 "turned by {offset}"
             );
         }
@@ -274,7 +274,7 @@ fn fails_with_1009_at_its_head_a_frame_that_takes_its_message_past_its_bound_a_c
 
     // a head alone, its payload never sent
     let mut meter = FrameMeter::new(&options);
-    let head = head_of((true, BINARY), (100, Some(KEY)));
+    let head = head_of((true, BINARY), (100, Some(MASKING_KEY)));
 
     assert_eq!(
         handed_of(&mut meter, &[head.as_bytes()]),
@@ -286,7 +286,7 @@ fn fails_with_1009_at_its_head_a_frame_that_takes_its_message_past_its_bound_a_c
     let mut meter = FrameMeter::new(&options);
     let mut bytes = masked(BINARY, (&[0; 40], false));
 
-    bytes.extend_from_slice(head_of((true, CONTINUATION), (25, Some(KEY))).as_bytes());
+    bytes.extend_from_slice(head_of((true, CONTINUATION), (25, Some(MASKING_KEY))).as_bytes());
 
     let (handed, verdict) = handed_of(&mut meter, &[&bytes]);
 
@@ -387,8 +387,13 @@ fn fails_with_1002_each_head_rfc_6455_forbids_at_the_byte_that_draws_it() {
 fn takes_a_length_not_in_its_minimal_form_as_tungstenite_takes_it() {
     let mut frame = vec![0x82, 0xFF, 0, 0, 0, 0, 0, 0, 0, 3];
 
-    frame.extend_from_slice(&KEY);
-    frame.extend([1_u8, 2, 3].iter().zip(KEY).map(|(byte, key)| byte ^ key));
+    frame.extend_from_slice(&MASKING_KEY);
+    frame.extend(
+        [1_u8, 2, 3]
+            .iter()
+            .zip(MASKING_KEY)
+            .map(|(byte, key)| byte ^ key),
+    );
 
     let mut meter = server_meter();
     let (handed, verdict) = handed_of(&mut meter, &[&frame]);

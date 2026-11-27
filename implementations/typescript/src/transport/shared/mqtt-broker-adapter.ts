@@ -27,11 +27,13 @@ import { byteCountOf, GenericError, ProgrammerError, toCancelError, toError } fr
 import {
   ACKNOWLEDGEMENT_TYPES,
   type AcknowledgementType,
+  FIRST_FAILURE,
   groupFilterOf,
   LARGEST_PACKET_SIZE,
   largestPayload,
   MAXIMUM_PACKET_SIZE,
   publishBytes,
+  REASON,
   topicOf,
 } from './mqtt-packets';
 import { guardPackets } from './mqtt-packet-guard';
@@ -202,14 +204,6 @@ const LONGEST_LIFE_SECONDS = 4_294_967_295;
 // `ws`'s own `maxPayload`, 100 MiB: what a message read whole holds at most, unless a packet within
 // its Maximum Packet Size is larger (RFC 6455 §10.4)
 const WS_MESSAGE_BYTES = 104_857_600;
-
-const REASON = Object.freeze({
-  NO_MATCHING_SUBSCRIBERS: 0x10,
-  NO_SUBSCRIPTION_EXISTED: 0x11,
-  SESSION_TAKEN_OVER: 0x8e,
-  SHARED_SUBSCRIPTIONS_NOT_SUPPORTED: 0x9e,
-  SUCCESS: 0x00,
-});
 
 // each acknowledgement MQTT.js names, by its packet type
 const ACKNOWLEDGED = Object.freeze({
@@ -1210,9 +1204,9 @@ export const createMqttBrokerAdapter = (options: IMqttBrokerAdapterOptions): IMq
 
           // * by its own code, which MQTT.js reads in every MQTT 5 CONNACK, before MQTT.js's error:
           // MQTT 5 names none under 0x80 (§3.2.2.2)
-          if (code !== undefined && code !== 0) {
+          if (code !== undefined && code !== REASON.SUCCESS) {
             const name =
-              code >= 0x80
+              code >= FIRST_FAILURE
                 ? (mqtt.ReasonCodes as Readonly<Record<number, string | undefined>>)[code]
                 : undefined;
 
@@ -1417,7 +1411,7 @@ export const createMqttBrokerAdapter = (options: IMqttBrokerAdapterOptions): IMq
                       incarnation.reasons.delete(messageId);
                     }
 
-                    if (code >= 0x80 || (isFailure(error) && code === 0)) {
+                    if (code >= FIRST_FAILURE || (isFailure(error) && code === REASON.SUCCESS)) {
                       refuse(
                         new GenericError(
                           `the broker of ${id} refused a publication to ${name}: ${reasonOf(code)}`,
@@ -1562,7 +1556,11 @@ export const createMqttBrokerAdapter = (options: IMqttBrokerAdapterOptions): IMq
 
               // ! kept where its broker may hold it, QoS 0 or 2 granted, which its stop lets go; a
               // code of 0x80 or more installed nothing
-              if (code !== undefined && code >= 0x80 && incarnation.filters.get(key) === record) {
+              if (
+                code !== undefined &&
+                code >= FIRST_FAILURE &&
+                incarnation.filters.get(key) === record
+              ) {
                 incarnation.filters.delete(key);
               }
 

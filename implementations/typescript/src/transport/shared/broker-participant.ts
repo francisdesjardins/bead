@@ -932,7 +932,7 @@ export const createBrokerParticipant = (options: IBrokerParticipantOptions): IBr
 
       const sent = published({ code, kind: ParcelKind.CLOSE });
 
-      end(code === CloseCode.NORMAL);
+      end(code === CloseCode.NORMAL_CLOSURE);
 
       return (
         sent?.then((outcome) => {
@@ -1232,7 +1232,7 @@ export const createBrokerParticipant = (options: IBrokerParticipantOptions): IBr
           case ParcelKind.PONG:
             return undefined;
           case ParcelKind.CLOSE:
-            takeClose(parcel.code === CloseCode.NORMAL);
+            takeClose(parcel.code === CloseCode.NORMAL_CLOSURE);
 
             return;
           default:

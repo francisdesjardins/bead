@@ -77,13 +77,54 @@ interface IOutput {
 
 // constants
 
-// the wire types of protobuf's Encoding guide, "Message Structure"
+// the wire types (Protocol Buffers Encoding, "Message Structure")
+
+/** Protocol Buffers Encoding, "Message Structure": the wire type of a varint. */
 const VARINT = 0;
+
+/** Protocol Buffers Encoding, "Message Structure": the wire type of a fixed 64-bit value. */
 const I64 = 1;
+
+/** Protocol Buffers Encoding, "Message Structure": the wire type of a length-delimited record. */
 const LEN = 2;
+
+/** Protocol Buffers Encoding, "Message Structure": the wire type of a group's start. */
 const SGROUP = 3;
+
+/** Protocol Buffers Encoding, "Message Structure": the wire type of a group's end. */
 const EGROUP = 4;
+
+/** Protocol Buffers Encoding, "Message Structure": the wire type of a fixed 32-bit value. */
 const I32 = 5;
+
+// a tag and a varint (Protocol Buffers Encoding, "Message Structure", "Base 128 Varints")
+
+/** Protocol Buffers Encoding, "Message Structure": a tag's wire type, its low three bits. */
+const WIRE_TYPE_MASK = 7;
+
+/** Protocol Buffers Encoding, "Message Structure": a tag's field number, above its wire type. */
+const FIELD_NUMBER_SHIFT = 3;
+
+/** Protocol Buffers Encoding, "Base 128 Varints": the most significant bit, set but on the last. */
+const CONTINUATION_BIT = 0x80;
+
+/** Protocol Buffers Encoding, "Base 128 Varints": the lower 7 bits of a byte, its digit. */
+const DIGIT_MASK = 0x7f;
+
+/** Protocol Buffers Encoding, "Base 128 Varints": the bits of a digit, 7 a byte. */
+const DIGIT_BITS = 7;
+
+/** Protocol Buffers Encoding, "Base 128 Varints": a varint takes between one and ten bytes. */
+const LONGEST_VARINT = 10;
+
+/** Protocol Buffers Encoding, "Message Structure": a tag, a varint of 32 bits, takes five at most. */
+const LONGEST_TAG = 5;
+
+/** Protocol Buffers Encoding, "Base 128 Varints": the largest 10th byte, the 64th bit alone. */
+const LARGEST_LAST_BYTE_64 = 0x01;
+
+/** Protocol Buffers Encoding, "Base 128 Varints": the largest 5th byte of 32 bits, its top four. */
+const LARGEST_LAST_BYTE_32 = 0x0f;
 
 /**
  * How deep a message nests at most below the top one, a group and a map's entry each a message
@@ -105,13 +146,10 @@ const LEGACY_REQUIRED: FeatureSet_FieldPresence.LEGACY_REQUIRED = 3;
 
 // what a varint's byte at each place is worth, ten places at most
 const PLACES = Object.freeze(
-  Array.from({ length: 10 }, (_, place) => {
-    return 2 ** (7 * place);
+  Array.from({ length: LONGEST_VARINT }, (_, place) => {
+    return 2 ** (DIGIT_BITS * place);
   })
 );
-
-// the place of a varint's 10th byte, the last, which holds its 64th bit and no other
-const LAST_PLACE = PLACES.length - 1;
 
 /**
  * Each scalar type's wire type, by `descriptor.proto`'s type number, which protobuf-es's
@@ -148,9 +186,6 @@ export const PROTO_REASONS = Object.freeze({
 
 // an unknown group's shape: any field, each skipped
 const ANY_FIELD: IMessageShape = Object.freeze({ fields: new Map(), isClosed: false });
-
-// the bytes of a varint that hold an int32's 32 bits, the last of them holding its top 4
-const INT32_PLACES = 5;
 
 // each message's shape, built once, at first use
 const SHAPES = new WeakMap<DescMessage, IMessageShape>();
@@ -450,7 +485,7 @@ const readVarint = (reader: IReader): number => {
   let value = 0;
 
   // * an index, not an iterator: a varint costs no object
-  for (let place = 0; place < PLACES.length; place += 1) {
+  for (let place = 0; place < LONGEST_VARINT; place += 1) {
     if (reader.at >= end) {
       return refuse('holds a varint cut short, or past the end of its message');
     }
@@ -458,12 +493,12 @@ const readVarint = (reader: IReader): number => {
     const byte = bytes[reader.at] ?? 0;
 
     reader.at += 1;
-    value += (byte & 0x7f) * (PLACES[place] ?? 0);
+    value += (byte & DIGIT_MASK) * (PLACES[place] ?? 0);
 
-    if (byte < 0x80) {
+    if ((byte & CONTINUATION_BIT) === 0) {
       // ! a 10th byte past 0x01 sets a bit past the 64th: no unsigned 64-bit integer, so no
       // encoding, refused here before protobuf-es drops those bits
-      if (place === LAST_PLACE && byte > 0x01) {
+      if (place === LONGEST_VARINT - 1 && byte > LARGEST_LAST_BYTE_64) {
         refuse('holds a varint past 64 bits');
       }
 
@@ -481,13 +516,13 @@ const readVarint = (reader: IReader): number => {
 const int32At = (bytes: Uint8Array, at: number): number => {
   let value = 0;
 
-  for (let place = 0; place < INT32_PLACES; place += 1) {
+  for (let place = 0; place < LONGEST_TAG; place += 1) {
     const byte = bytes[at + place] ?? 0;
 
     // ! a shift is an int32's: the 5th byte's bits past the 32nd fall away
-    value |= (byte & 0x7f) << (7 * place);
+    value |= (byte & DIGIT_MASK) << (DIGIT_BITS * place);
 
-    if (byte < 0x80) {
+    if ((byte & CONTINUATION_BIT) === 0) {
       break;
     }
   }
@@ -500,7 +535,7 @@ const readTag = (reader: IReader): number => {
   const { bytes, end } = reader;
   let value = 0;
 
-  for (let place = 0; place < INT32_PLACES; place += 1) {
+  for (let place = 0; place < LONGEST_TAG; place += 1) {
     if (reader.at >= end) {
       return refuse('holds a tag cut short, or past the end of its message');
     }
@@ -508,15 +543,15 @@ const readTag = (reader: IReader): number => {
     const byte = bytes[reader.at] ?? 0;
 
     // ! a 5th byte past 0x0F sets a bit past the 32nd, or carries on to a 6th
-    if (place === INT32_PLACES - 1 && byte > 0x0f) {
+    if (place === LONGEST_TAG - 1 && byte > LARGEST_LAST_BYTE_32) {
       break;
     }
 
     reader.at += 1;
     // a sum, not a shift: bit 31 stays unsigned
-    value += (byte & 0x7f) * (PLACES[place] ?? 0);
+    value += (byte & DIGIT_MASK) * (PLACES[place] ?? 0);
 
-    if (byte < 0x80) {
+    if ((byte & CONTINUATION_BIT) === 0) {
       return value;
     }
   }
@@ -567,13 +602,15 @@ const skipPacked = (reader: IReader, packs: number): void => {
     const byte = bytes[at] ?? 0;
 
     // ! the byte that ends a varint after nine carried ones is its 10th: past 0x01, past 64 bits
-    if (byte < 0x80 && carried === LAST_PLACE && byte > 0x01) {
+    const isLast = (byte & CONTINUATION_BIT) === 0;
+
+    if (isLast && carried === LONGEST_VARINT - 1 && byte > LARGEST_LAST_BYTE_64) {
       refuse('holds a varint past 64 bits');
     }
 
-    carried = byte < 0x80 ? 0 : carried + 1;
+    carried = isLast ? 0 : carried + 1;
 
-    if (carried === PLACES.length) {
+    if (carried === LONGEST_VARINT) {
       refuse('holds a varint of more than 10 bytes');
     }
   }
@@ -605,8 +642,8 @@ const deeper = (reader: IReader): number => {
 const walkRecords = (reader: IReader, shape: IMessageShape): void => {
   while (reader.at < reader.end) {
     const tag = readTag(reader);
-    const number = tag >>> 3;
-    const wire = tag & 7;
+    const number = tag >>> FIELD_NUMBER_SHIFT;
+    const wire = tag & WIRE_TYPE_MASK;
 
     if (number === 0) {
       refuse('holds field number 0');
@@ -697,9 +734,9 @@ const writeVarint = (bytes: Uint8Array, { at, value }: { at: number; value: numb
   let rest = value;
   let place = at;
 
-  while (rest >= 0x80) {
-    bytes[place] = (rest & 0x7f) | 0x80;
-    rest >>>= 7;
+  while (rest > DIGIT_MASK) {
+    bytes[place] = (rest & DIGIT_MASK) | CONTINUATION_BIT;
+    rest >>>= DIGIT_BITS;
     place += 1;
   }
 
@@ -710,7 +747,7 @@ const writeVarint = (bytes: Uint8Array, { at, value }: { at: number; value: numb
 const lengthSizeOf = (length: number): number => {
   let size = 1;
 
-  for (let rest = length; rest >= 0x80; rest >>>= 7) {
+  for (let rest = length; rest > DIGIT_MASK; rest >>>= DIGIT_BITS) {
     size += 1;
   }
 
@@ -733,9 +770,9 @@ const rewriteRecords = (
   while (reader.at < reader.end) {
     const start = reader.at;
     const tag = readTag(reader);
-    const field = shape.fields.get(tag >>> 3);
+    const field = shape.fields.get(tag >>> FIELD_NUMBER_SHIFT);
 
-    switch (tag & 7) {
+    switch (tag & WIRE_TYPE_MASK) {
       case EGROUP:
         output.bytes.set(bytes.subarray(start, reader.at), output.at);
         output.at += reader.at - start;

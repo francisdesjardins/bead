@@ -246,6 +246,7 @@ const CASES = [
   ['tools/pack-typescript.mjs', ['commits', 'typescript']],
   ['README.md', ['commits', 'spec']],
   ['tools/twins.tsv', ['commits']],
+  ['tools/wire-names.tsv', ['commits', 'typescript', 'dotnet', 'rust']],
   ['tools/check-versions.mjs', ['commits', 'spec']],
   ['tools/coverage-floors.json', ['commits', 'typescript', 'dotnet', 'rust']],
   ['tools/__tests__/check-a11y.test.mjs', ['commits', 'typescript']],

@@ -63,6 +63,11 @@
     // `bead/options-last` and whose signature it is.
     "max-params": ["error", 3],
     "bead/options-last": "error",
+    // A wire format's numbers are named after their standard (decision 0057): in the modules the
+    // TypeScript column of the root's `tools/wire-names.tsv` lists, a hex or binary literal stands
+    // only in a definition, and `&`, `|` and `^` take no literal above 1 outside one. It has no
+    // exception form: a number of no standard takes another form, or a module of its own.
+    "bead/wire-literal": "error",
     "no-unused-vars": "off",
     "typescript/no-unused-vars": [
       "error",
@@ -297,6 +302,8 @@
     "**/*_pb.ts",
     // the plugin's cases, refused on purpose: `tools/check-oxlint-plugin.mjs` lints them apart
     "tools/oxlint-plugin.cases.ts",
+    // the notation rule's cases, refused on purpose: `tools/check-oxlint-plugin.mjs` lints them apart
+    "tools/wire-literal.cases.ts",
     // the surface's cases, refused on purpose: `tools/check-surface.mjs --cases` reads them apart
     "tools/surface.cases.ts",
     // protobuf's conformance testee, read with the code generated into it at run time alone:

@@ -101,7 +101,7 @@ test.describe('broker sequence', () => {
     parts.add(bytesOf(60), { isLast: false });
     expect(parts.add(bytesOf(5), { isLast: false })).toEqual({
       lost: {
-        code: CloseCode.TOO_BIG,
+        code: CloseCode.MESSAGE_TOO_BIG,
         reason: "an envelope's parts would pass maximumEnvelopePartsBytes, 64 bytes",
       },
     });
@@ -171,7 +171,7 @@ test.describe('broker sequence', () => {
     bounded.add(bytesOf(1), { isLast: false });
     expect(bounded.add(bytesOf(1), { isLast: false })).toEqual({
       lost: {
-        code: CloseCode.TOO_BIG,
+        code: CloseCode.MESSAGE_TOO_BIG,
         reason: "an envelope's parts would pass maximumEnvelopePartsBytes, 1 byte",
       },
     });

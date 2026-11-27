@@ -108,9 +108,14 @@ pub enum LoneSurrogates {
     AsNull,
 }
 
-// the bytes of a scan, by name
-const QUOTE: u8 = b'"';
-const BACKSLASH: u8 = b'\\';
+/// RFC 8259 §7: the quotation mark, which opens and closes a string.
+const QUOTATION_MARK: u8 = b'"';
+
+/// RFC 8259 §7: the escape, the reverse solidus, which opens an escape in a string.
+const ESCAPE: u8 = b'\\';
+
+/// RFC 8259 §7: the last control character, U+001F, which a string holds only escaped.
+const LAST_CONTROL_CHARACTER: u8 = 0x1F;
 
 // where the string opening at `index` closes: the index of its closing quote, the length for none
 fn end_of_string(text: &[u8], index: usize) -> usize {
@@ -118,8 +123,8 @@ fn end_of_string(text: &[u8], index: usize) -> usize {
 
     while let Some(&byte) = text.get(at) {
         match byte {
-            QUOTE => return at,
-            BACKSLASH => at = at.saturating_add(2),
+            QUOTATION_MARK => return at,
+            ESCAPE => at = at.saturating_add(2),
             _ => at = at.saturating_add(1),
         }
     }
@@ -136,7 +141,7 @@ fn is_too_deep(text: &[u8]) -> bool {
 
     while let Some(&byte) = text.get(index) {
         match byte {
-            QUOTE => index = end_of_string(text, index),
+            QUOTATION_MARK => index = end_of_string(text, index),
             b'[' | b'{' => {
                 depth = depth.saturating_add(1);
 
@@ -198,7 +203,7 @@ impl Parser<'_> {
         match self.peek() {
             Some(b'{') => self.object(),
             Some(b'[') => self.array(),
-            Some(QUOTE) => self.string().map(|(text, has_lone)| {
+            Some(QUOTATION_MARK) => self.string().map(|(text, has_lone)| {
                 if has_lone {
                     Value::Null
                 } else {
@@ -227,7 +232,7 @@ impl Parser<'_> {
         loop {
             self.skip_white();
 
-            if self.peek() != Some(QUOTE) {
+            if self.peek() != Some(QUOTATION_MARK) {
                 return Err(Grammar);
             }
 
@@ -319,7 +324,7 @@ impl Parser<'_> {
             let start = self.at;
 
             while let Some(byte) = self.peek() {
-                if byte == QUOTE || byte == BACKSLASH || byte < 0x20 {
+                if byte == QUOTATION_MARK || byte == ESCAPE || byte <= LAST_CONTROL_CHARACTER {
                     break;
                 }
 
@@ -334,12 +339,12 @@ impl Parser<'_> {
             }
 
             match self.peek() {
-                Some(QUOTE) => {
+                Some(QUOTATION_MARK) => {
                     self.at = self.at.saturating_add(1);
                     flush(&mut units, (&mut text, &mut has_lone));
                     break;
                 }
-                Some(BACKSLASH) => {
+                Some(ESCAPE) => {
                     self.at = self.at.saturating_add(1);
 
                     let escaped = self.peek().ok_or(Grammar)?;
@@ -347,8 +352,8 @@ impl Parser<'_> {
                     self.at = self.at.saturating_add(1);
 
                     let short = match escaped {
-                        QUOTE => '"',
-                        BACKSLASH => '\\',
+                        QUOTATION_MARK => '"',
+                        ESCAPE => '\\',
                         b'/' => '/',
                         b'b' => '\u{8}',
                         b'f' => '\u{c}',
@@ -563,7 +568,7 @@ fn write_string(text: &str, out: &mut String) {
             '\n' => out.push_str("\\n"),
             '\r' => out.push_str("\\r"),
             '\t' => out.push_str("\\t"),
-            control if u32::from(control) < 0x20 => {
+            control if u32::from(control) <= u32::from(LAST_CONTROL_CHARACTER) => {
                 use core::fmt::Write as _;
 
                 write!(out, "\\u{:04x}", u32::from(control)).ok();

@@ -2,7 +2,8 @@
 //! `check-surface.mjs` hold the TypeScript side's: the parameter rule, the options struct's shape,
 //! each library crate's public surface pinned to its list, no tuple on that surface, the count of
 //! the tuples of three elements or more a function takes, the errors a future of a Result
-//! documents, the comment tags, no text a misread of UTF-8 left, and every member under the
+//! documents, the comment tags, no text a misread of UTF-8 left, every wire format's number read
+//! by its name in the modules the table of their names lists, and every member under the
 //! workspace's lints. Its tests run them over every crate's source, and over the cases of each
 //! verdict.
 
@@ -14,6 +15,7 @@ mod surface;
 mod tags;
 mod tuples;
 mod wide;
+mod wire;
 
 pub use members::members_of;
 pub use misread::misread_of;
@@ -23,6 +25,7 @@ pub use surface::surface_of;
 pub use tags::{Comment, CommentKind, comments_of, tags_of};
 pub use tuples::{crate_tuples_of, tuples_of};
 pub use wide::wide_tuples_of;
+pub use wire::{wire_literals_of, wire_modules_of};
 
 /// A place a check refused, and why.
 #[derive(Debug, Clone, PartialEq, Eq)]

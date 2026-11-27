@@ -60,11 +60,12 @@ use crate::mqtt::link::{
     Address, Incoming, OpenOptions, Opened, Reader, Writer, address_of, open, ready_reset,
 };
 use crate::mqtt::packets::{
-    Connect, LARGEST_PACKET_SIZE, MAXIMUM_PACKET_SIZE, MqttAcknowledgement, MqttConnack,
-    MqttPacket, MqttPublish, MqttPublishShapeOptions, MqttReading, Will, code_of, group_filter_of,
-    largest_payload, publish_bytes, read_packet, reason_name_of, topic_of, write_connect,
-    write_disconnect, write_pingreq, write_puback, write_publish, write_subscribe,
-    write_unsubscribe,
+    Connect, FIRST_FAILURE, GRANTED_QOS_1, LARGEST_PACKET_SIZE, MAXIMUM_PACKET_SIZE,
+    MqttAcknowledgement, MqttConnack, MqttPacket, MqttPublish, MqttPublishShapeOptions,
+    MqttReading, NO_MATCHING_SUBSCRIBERS, NO_SUBSCRIPTION_EXISTED, SESSION_TAKEN_OVER,
+    SHARED_SUBSCRIPTIONS_NOT_SUPPORTED, SUCCESS, Will, code_of, group_filter_of, largest_payload,
+    publish_bytes, read_packet, reason_name_of, topic_of, write_connect, write_disconnect,
+    write_pingreq, write_puback, write_publish, write_subscribe, write_unsubscribe,
 };
 use crate::mqtt::quota::{Queued, SendQuota};
 use crate::net::credential::{CredentialProvider, CredentialProviderError};
@@ -94,15 +95,6 @@ const LONGEST_KEEP_ALIVE: Duration = Duration::from_secs(65_535);
 
 // a quota a CONNACK that names none gives (MQTT 5.0 §3.2.2.3.3)
 const RECEIVE_MAXIMUM: u16 = 65_535;
-
-// the Reason Codes the adapter reads a meaning in (MQTT 5.0 §2.4)
-const SUCCESS: u8 = 0x00;
-const GRANTED_QOS_1: u8 = 0x01;
-const NO_MATCHING_SUBSCRIBERS: u8 = 0x10;
-const NO_SUBSCRIPTION_EXISTED: u8 = 0x11;
-const REFUSED: u8 = 0x80;
-const SESSION_TAKEN_OVER: u8 = 0x8E;
-const SHARED_SUBSCRIPTIONS_NOT_SUPPORTED: u8 = 0x9E;
 
 // ! no refusal names the password it refuses: a word never carries the secret
 const NOT_A_PASSWORD: &str = "a password is a non-empty string holding no NUL";
@@ -1429,7 +1421,7 @@ impl State {
 
         let refusal = if connack.reason_code != SUCCESS {
             // * MQTT 5 names no CONNACK Reason Code under 0x80 but its Success (MQTT 5.0 §3.2.2.2)
-            let reason = if connack.reason_code >= REFUSED {
+            let reason = if connack.reason_code >= FIRST_FAILURE {
                 reason_of(connack.reason_code)
             } else {
                 code_of(connack.reason_code)
@@ -1947,7 +1939,7 @@ impl State {
         // * 0x00, or none, takes it, 0x10 says no subscriber, and 0x80 or more, its table's or not,
         // refuses it; its reader refused any other (spec 15.28)
         let code = acknowledgement.reason_code();
-        let outcome = if code >= REFUSED {
+        let outcome = if code >= FIRST_FAILURE {
             Err(BrokerError::failed(format!(
                 "the broker of {id} refused a publication to {}: {}",
                 publication.publish.topic,
@@ -2144,7 +2136,7 @@ impl State {
 
         // ! kept where its broker may hold it, QoS 0 or 2 granted, which its stop lets go; a code of
         // 0x80 or more, its table's or not, installed nothing (spec 15.27)
-        if code >= REFUSED {
+        if code >= FIRST_FAILURE {
             link.forget((&subscribing.key, subscribing.record));
         }
 

@@ -73,16 +73,14 @@ pub(crate) mod flags {
     pub(crate) const SECURE: u8 = 0x04;
 }
 
-/// A CLOSE's codes, a WebSocket's (RFC 6455 §7.4.1), 4000 and 4001 of its private range.
+/// A CLOSE's codes (spec 15.17): a WebSocket's, which `websocket_frame` names after RFC 6455
+/// §7.4.1 (a clean end, its end going away, a parcel its end refuses, an envelope's parts past their
+/// bound), and 4000 and 4001 of its private range, Bead's own.
 pub(crate) mod codes {
-    /// A clean end.
-    pub(crate) const NORMAL: u16 = 1_000;
-    /// Its end going away: a server's stop.
-    pub(crate) const GOING_AWAY: u16 = 1_001;
-    /// A parcel its end refuses.
-    pub(crate) const PROTOCOL_ERROR: u16 = 1_002;
-    /// An envelope's parts past their bound.
-    pub(crate) const TOO_BIG: u16 = 1_009;
+    pub(crate) use crate::websocket_frame::{
+        GOING_AWAY, MESSAGE_TOO_BIG, NORMAL_CLOSURE, PROTOCOL_ERROR,
+    };
+
     /// A parcel lost, or a bound passed.
     pub(crate) const LOST: u16 = 4_000;
     /// A ping left unanswered.
@@ -91,10 +89,10 @@ pub(crate) mod codes {
 
 // the codes a CLOSE carries
 const CODES: [u16; 6] = [
-    codes::NORMAL,
+    codes::NORMAL_CLOSURE,
     codes::GOING_AWAY,
     codes::PROTOCOL_ERROR,
-    codes::TOO_BIG,
+    codes::MESSAGE_TOO_BIG,
     codes::LOST,
     codes::UNANSWERED,
 ];

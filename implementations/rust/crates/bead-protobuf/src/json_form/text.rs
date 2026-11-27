@@ -18,6 +18,30 @@ pub(crate) enum Node {
 
 // ── Reading ───────────────────────────────────────────────────────────────────
 
+/// RFC 8259 §7: the last control character, U+001F, which a string holds only escaped.
+const LAST_CONTROL_CHARACTER: u8 = 0x1F;
+
+/// RFC 2781 §2.2: the first high surrogate, which leads a pair.
+const FIRST_HIGH_SURROGATE: u32 = 0xD800;
+
+/// RFC 2781 §2.2: the last high surrogate.
+const LAST_HIGH_SURROGATE: u32 = 0xDBFF;
+
+/// RFC 2781 §2.2: the first low surrogate, which ends a pair.
+const FIRST_LOW_SURROGATE: u32 = 0xDC00;
+
+/// RFC 2781 §2.2: the last low surrogate, the surrogates' end.
+const LAST_LOW_SURROGATE: u32 = 0xDFFF;
+
+/// RFC 2781 §2.1: the bits of a character each surrogate of its pair carries.
+const SURROGATE_BITS: u32 = 10;
+
+/// RFC 2781 §2.1: the first character past the Basic Multilingual Plane, which a pair writes.
+const FIRST_SUPPLEMENTARY: u32 = 0x10000;
+
+/// RFC 8259 §8.1: the byte order mark, U+FEFF, as UTF-8 writes it, which no JSON text opens with.
+const BYTE_ORDER_MARK: [u8; 3] = [0xEF, 0xBB, 0xBF];
+
 // a text's reading: its characters, and where it stands
 struct Text<'a> {
     bytes: &'a [u8],
@@ -103,7 +127,7 @@ impl Text<'_> {
 
                     value.extend_from_slice(character.encode_utf8(&mut buffer).as_bytes());
                 }
-                0x00..=0x1F => return Err(not_json()),
+                0..=LAST_CONTROL_CHARACTER => return Err(not_json()),
                 _ => value.push(byte),
             }
         }
@@ -115,7 +139,7 @@ impl Text<'_> {
     fn escaped(&mut self) -> Result<char, Refusal> {
         let first = self.hex4()?;
 
-        if (0xD800..0xDC00).contains(&first) {
+        if (FIRST_HIGH_SURROGATE..=LAST_HIGH_SURROGATE).contains(&first) {
             if self.bytes.get(self.at..self.at.saturating_add(2)) != Some(b"\\u".as_slice()) {
                 return Err(Refusal::new("a surrogate alone"));
             }
@@ -124,13 +148,13 @@ impl Text<'_> {
 
             let second = self.hex4()?;
 
-            if !(0xDC00..0xE000).contains(&second) {
+            if !(FIRST_LOW_SURROGATE..=LAST_LOW_SURROGATE).contains(&second) {
                 return Err(Refusal::new("a surrogate alone"));
             }
 
-            let code = 0x10000_u32
-                .saturating_add((first.saturating_sub(0xD800)) << 10)
-                .saturating_add(second.saturating_sub(0xDC00));
+            let code = FIRST_SUPPLEMENTARY
+                .saturating_add((first.saturating_sub(FIRST_HIGH_SURROGATE)) << SURROGATE_BITS)
+                .saturating_add(second.saturating_sub(FIRST_LOW_SURROGATE));
 
             return char::from_u32(code).ok_or_else(|| Refusal::new("a surrogate alone"));
         }
@@ -315,7 +339,7 @@ pub(crate) fn read_text(bytes: &[u8]) -> Result<Node, Refusal> {
         return Err(Refusal::new("not UTF-8"));
     }
 
-    if bytes.starts_with(&[0xEF, 0xBB, 0xBF]) {
+    if bytes.starts_with(&BYTE_ORDER_MARK) {
         return Err(Refusal::new("a byte order mark"));
     }
 

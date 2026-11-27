@@ -718,7 +718,10 @@ impl BrokerTransportClient {
 
         inner.participant.post(move |state: &mut ParticipantState| {
             if is_clean {
-                state.close(held.pair, (crate::broker::parcel::codes::NORMAL, true));
+                state.close(
+                    held.pair,
+                    (crate::broker::parcel::codes::NORMAL_CLOSURE, true),
+                );
             } else {
                 state.reset(held.pair);
             }

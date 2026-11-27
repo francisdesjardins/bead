@@ -1560,7 +1560,7 @@ impl ParticipantState {
             }
             // a PONG answers what it heard
             kinds::PONG => {}
-            kinds::CLOSE => self.take_close(pair, parcel.code == Some(codes::NORMAL)),
+            kinds::CLOSE => self.take_close(pair, parcel.code == Some(codes::NORMAL_CLOSURE)),
             _ => {
                 let why = format!("{} on a connection open", kind_named(parcel.kind));
 

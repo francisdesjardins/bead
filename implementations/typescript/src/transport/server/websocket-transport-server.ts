@@ -37,6 +37,14 @@ import { createHold, type IHold } from '../shared/hold';
 import { ReadyState } from '../shared/ready-state';
 import { bytesOf, createSendQueue, type ISendQueue } from '../shared/send-queue';
 import type { Data, ITransportMessage } from '../shared/types';
+import {
+  ABNORMAL_CLOSURE,
+  GOING_AWAY,
+  MESSAGE_TOO_BIG,
+  NORMAL_CLOSURE,
+  POLICY_VIOLATION,
+  TRY_AGAIN_LATER,
+} from '../shared/websocket-frame';
 import { createFrameMeter, type IFrameVerdict, rateDueOf } from '../shared/websocket-frame-meter';
 import { createMessageBudget } from '../shared/websocket-message-budget';
 import {
@@ -510,7 +518,7 @@ export const createWebSocketTransportServer = (
         meters.get(socket)?.stop();
         fail(
           socket,
-          code === 1009
+          code === MESSAGE_TOO_BIG
             ? tooBigOf(connectionHandle, { maximumMessageBytes: maxPayload })
             : closedWithOf(connectionHandle, { code, why })
         );
@@ -526,7 +534,7 @@ export const createWebSocketTransportServer = (
       // why a verdict fails a connection, naming the bound and its value, or the rule its head
       // broke (spec 15.3, 15.12)
       const whyOf = ({ code, reason }: IFrameVerdict): string => {
-        return code === 1008
+        return code === POLICY_VIOLATION
           ? `${reason}, ${String(maximumMessageFrames)} frames`
           : `a frame head RFC 6455 forbids, ${reason}`;
       };
@@ -591,7 +599,7 @@ export const createWebSocketTransportServer = (
           due = timers.setTimeout(
             () => {
               due = undefined;
-              failWith(1008, tooSlow);
+              failWith(POLICY_VIOLATION, tooSlow);
             },
             // ! a millisecond at least, counted whole: Bead arms no timer for less (decision 0011)
             Math.max(1, Math.ceil(dueAt - timers.performance.now()))
@@ -602,7 +610,7 @@ export const createWebSocketTransportServer = (
 
         const holder = budget.holderOf({
           castOff: () => {
-            failWith(1013, overBudget);
+            failWith(TRY_AGAIN_LATER, overBudget);
           },
         });
 
@@ -655,7 +663,7 @@ export const createWebSocketTransportServer = (
           }
 
           if (isCastOff) {
-            failWith(1013, overBudget);
+            failWith(TRY_AGAIN_LATER, overBudget);
           } else if (verdict !== undefined) {
             failWith(verdict.code, whyOf(verdict));
           } else if (meter.isEnded) {
@@ -991,7 +999,7 @@ export const createWebSocketTransportServer = (
 
           if (connections.get(connectionHandle) === connection) {
             connections.delete(connectionHandle);
-            tell(CLOSE_EVENT, [code === 1000 && failure === undefined, connectionHandle]);
+            tell(CLOSE_EVENT, [code === NORMAL_CLOSURE && failure === undefined, connectionHandle]);
           }
         };
 
@@ -999,7 +1007,7 @@ export const createWebSocketTransportServer = (
         // `ws`'s own terminate does (RFC 6455 §7.1.1)
         endings.set(socket, () => {
           taken?.destroy();
-          end(1006); // closed abnormally (RFC 6455 §7.4.1)
+          end(ABNORMAL_CLOSURE);
         });
         socket.on(CLOSE_EVENT, (code) => {
           end(code);
@@ -1042,7 +1050,7 @@ export const createWebSocketTransportServer = (
         // the connections was taken already, or its registry cleared; reached only by an injected
         // `WebSocketServer` that delivers a connection after its `close()`, since ws takes none then
         if (server.isClosing() || server.isClosed()) {
-          void closeSocket(socket, 1001); // going away
+          void closeSocket(socket, GOING_AWAY);
         }
 
         // last and synchronous: a listener meets a connection already registered and wired, and before
@@ -1188,14 +1196,14 @@ export const createWebSocketTransportServer = (
             connections
               .values()
               .map(({ socket }) => {
-                return closeSocket(socket, 1001); // going away
+                return closeSocket(socket, GOING_AWAY);
               })
               .toArray()
           );
         },
 
         close: ({ socket }) => {
-          return closeSocket(socket, 1000);
+          return closeSocket(socket, NORMAL_CLOSURE);
         },
 
         // ! ws stops its socket, and emits what it already parsed of the read under way, which the

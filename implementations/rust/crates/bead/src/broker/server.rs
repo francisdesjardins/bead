@@ -1080,7 +1080,7 @@ impl ServerTransport for BrokerTransportServer {
                 let pair = locked(&server.state).handles.get(&handle).copied();
 
                 pair.is_some_and(|pair| {
-                    state.close(pair, (crate::broker::parcel::codes::NORMAL, true));
+                    state.close(pair, (crate::broker::parcel::codes::NORMAL_CLOSURE, true));
 
                     true
                 })

@@ -50,9 +50,28 @@ import { protoCodecOf, readProtoBytes } from '../proto/codec';
 import { jsonNestsPast } from '../proto/depth';
 import { PROTO_DEPTH, requiredShapeOf } from '../proto/records';
 import { unsetPathOf } from '../proto/required';
-import { PAYLOAD_CODECS, STRICT_UTF8 } from '../router/shared/payloads';
+import {
+  BEGIN_ARRAY,
+  BEGIN_OBJECT,
+  CARRIAGE_RETURN,
+  END_ARRAY,
+  END_OBJECT,
+  ESCAPE,
+  HORIZONTAL_TAB,
+  LINE_FEED,
+  NAME_SEPARATOR,
+  PAYLOAD_CODECS,
+  QUOTATION_MARK,
+  SPACE,
+  STRICT_UTF8,
+  VALUE_SEPARATOR,
+} from '../router/shared/payloads';
+import { BYTE_ORDER_MARK } from '../router/shared/unicode';
 import { ProgrammerError } from '../transport/shared/errors';
+import { base64Of, bytesOfBase64 } from './base64';
 import type { HttpPayload } from './routes';
+
+export { base64Of } from './base64';
 
 // types
 
@@ -145,16 +164,6 @@ const UINT64 = { least: 0n, most: 2n ** 64n - 1n };
 
 // the largest power of ten past which no integer of 64 bits is, as a number's exponent
 const LARGEST_EXPONENT = 20;
-
-const BASE64 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
-// each character's six bits, the URL-safe alphabet's `-` and `_` beside the standard's `+` and `/`
-const SEXTETS: ReadonlyMap<string, number> = new Map([
-  ...BASE64.split('').map((character, index) => {
-    return [character, index] as const;
-  }),
-  ['-', 62],
-  ['_', 63],
-]);
 
 // the well-known types whose JSON is a form of their own, under an `Any`'s `value` (5.4.6)
 const OWN_FORMS: ReadonlySet<string> = new Set([
@@ -382,7 +391,12 @@ const parseText = (text: string): JsonNode => {
     for (;;) {
       const code = text.charCodeAt(at);
 
-      if (code !== 0x20 && code !== 0x09 && code !== 0x0a && code !== 0x0d) {
+      if (
+        code !== SPACE &&
+        code !== HORIZONTAL_TAB &&
+        code !== LINE_FEED &&
+        code !== CARRIAGE_RETURN
+      ) {
         return;
       }
 
@@ -402,11 +416,11 @@ const parseText = (text: string): JsonNode => {
         return fail();
       }
 
-      if (code === 0x22) {
+      if (code === QUOTATION_MARK) {
         break;
       }
 
-      at += code === 0x5c ? 2 : 1;
+      at += code === ESCAPE ? 2 : 1;
     }
 
     at += 1;
@@ -431,7 +445,7 @@ const parseText = (text: string): JsonNode => {
 
     const code = text.charCodeAt(at);
 
-    if (code === 0x7b || code === 0x5b) {
+    if (code === BEGIN_OBJECT || code === BEGIN_ARRAY) {
       if (depth >= TEXT_DEPTH) {
         return fail(`nested past ${String(MAXIMUM_DEPTH)}`);
       }
@@ -439,10 +453,10 @@ const parseText = (text: string): JsonNode => {
       at += 1;
       skip();
 
-      if (code === 0x5b) {
+      if (code === BEGIN_ARRAY) {
         const items: JsonNode[] = [];
 
-        if (text.charCodeAt(at) === 0x5d) {
+        if (text.charCodeAt(at) === END_ARRAY) {
           at += 1;
 
           return { items, kind: 'array' };
@@ -456,11 +470,11 @@ const parseText = (text: string): JsonNode => {
 
           at += 1;
 
-          if (next === 0x5d) {
+          if (next === END_ARRAY) {
             return { items, kind: 'array' };
           }
 
-          if (next !== 0x2c) {
+          if (next !== VALUE_SEPARATOR) {
             return fail();
           }
         }
@@ -469,7 +483,7 @@ const parseText = (text: string): JsonNode => {
       const members: (readonly [string, JsonNode])[] = [];
       const names = new Set<string>();
 
-      if (text.charCodeAt(at) === 0x7d) {
+      if (text.charCodeAt(at) === END_OBJECT) {
         at += 1;
 
         return { kind: 'object', members };
@@ -478,7 +492,7 @@ const parseText = (text: string): JsonNode => {
       for (;;) {
         skip();
 
-        if (text.charCodeAt(at) !== 0x22) {
+        if (text.charCodeAt(at) !== QUOTATION_MARK) {
           return fail();
         }
 
@@ -491,7 +505,7 @@ const parseText = (text: string): JsonNode => {
         names.add(name);
         skip();
 
-        if (text.charCodeAt(at) !== 0x3a) {
+        if (text.charCodeAt(at) !== NAME_SEPARATOR) {
           return fail();
         }
 
@@ -503,17 +517,17 @@ const parseText = (text: string): JsonNode => {
 
         at += 1;
 
-        if (next === 0x7d) {
+        if (next === END_OBJECT) {
           return { kind: 'object', members };
         }
 
-        if (next !== 0x2c) {
+        if (next !== VALUE_SEPARATOR) {
           return fail();
         }
       }
     }
 
-    if (code === 0x22) {
+    if (code === QUOTATION_MARK) {
       return { kind: 'string', value: readString() };
     }
 
@@ -574,7 +588,7 @@ export const readJsonText = (bytes: Uint8Array): JsonNode => {
     throw new JsonFormError('not UTF-8');
   }
 
-  if (text.charCodeAt(0) === 0xfeff) {
+  if (text.charCodeAt(0) === BYTE_ORDER_MARK) {
     throw new JsonFormError('a byte order mark');
   }
 
@@ -674,62 +688,6 @@ const numberJsonOf = (value: number, { isFloat }: { isFloat: boolean }): string 
   }
 
   return isFloat ? shortestFloatOf(value) : String(value);
-};
-
-// ── Base64 ────────────────────────────────────────────────────────────────────
-
-/**
- * The bytes of `text`, base64 of one alphabet, the standard's or the URL-safe one, padded correctly
- * or not at all, the bits its last character holds past its bytes whatever they are (5.3.6).
- */
-const bytesOfBase64 = (text: string, at: IJsonPlace): Uint8Array => {
-  const padding = /=*$/u.exec(text)?.[0].length ?? 0;
-  const body = text.slice(0, text.length - padding);
-
-  if (/[^A-Za-z0-9+/_-]/u.test(body) || (/[+/]/u.test(body) && /[-_]/u.test(body))) {
-    throw new JsonFormError('bytes of no one alphabet of base64', { at });
-  }
-
-  const rest = body.length % 4;
-
-  if (rest === 1 || (padding > 0 && (padding > 2 || rest + padding !== 4))) {
-    throw new JsonFormError('bytes padded wrongly', { at });
-  }
-
-  const bytes = new Uint8Array(Math.floor((body.length * 3) / 4));
-  let bits = 0;
-  let count = 0;
-  let index = 0;
-
-  for (const character of body) {
-    bits = (bits << 6) | (SEXTETS.get(character) ?? 0);
-    count += 6;
-
-    if (count >= 8) {
-      count -= 8;
-      bytes[index] = (bits >> count) & 0xff;
-      index += 1;
-    }
-  }
-
-  return bytes;
-};
-
-/** `bytes` in standard base64, padded (5.6.6). */
-export const base64Of = (bytes: Uint8Array): string => {
-  let text = '';
-
-  for (let index = 0; index < bytes.length; index += 3) {
-    const [a = 0, b = 0, c = 0] = [bytes[index], bytes[index + 1], bytes[index + 2]];
-    const triple = (a << 16) | (b << 8) | c;
-
-    text += BASE64[(triple >> 18) & 63] ?? '';
-    text += BASE64[(triple >> 12) & 63] ?? '';
-    text += index + 1 < bytes.length ? (BASE64[(triple >> 6) & 63] ?? '') : '=';
-    text += index + 2 < bytes.length ? (BASE64[triple & 63] ?? '') : '=';
-  }
-
-  return text;
 };
 
 // ── Time ──────────────────────────────────────────────────────────────────────
@@ -1015,7 +973,13 @@ const readScalar = (
     throw new JsonFormError('no bytes', { at });
   }
 
-  return bytesOfBase64(node.value, at);
+  const bytes = bytesOfBase64(node.value);
+
+  if (typeof bytes === 'string') {
+    throw new JsonFormError(bytes, { at });
+  }
+
+  return bytes;
 };
 
 /** An enum's number of `node`: one of its values' names, or a number its values or its openness take. */

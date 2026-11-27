@@ -1,0 +1,13 @@
+{
+  "$schema": "https://raw.githubusercontent.com/oxc-project/oxc/main/npm/oxlint/configuration_schema.json",
+
+  // The package's configuration, for `wire-literal.cases.ts` alone: `check-oxlint-plugin.mjs` lints
+  // the cases through it, `bead/wire-literal` given them as its one module, from the package's
+  // folder, in place of the root's table. The `ignorePatterns` that leave them out of the
+  // package's lint are not inherited through `extends`; were they ever, the check would lint no
+  // file, and fail.
+  "extends": ["../.oxlintrc.json"],
+  "rules": {
+    "bead/wire-literal": ["error", { "modules": ["tools/wire-literal.cases.ts"] }]
+  }
+}

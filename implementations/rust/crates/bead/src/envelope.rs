@@ -889,18 +889,42 @@ pub fn read_header(bytes: &[u8], side: RouterSide) -> Result<Option<ReadHeader>,
     }))
 }
 
+/// RFC 3629 §3: the top two bits of a byte, which say whether it continues a character.
+const CONTINUATION_MASK: u8 = 0xC0;
+
+/// RFC 3629 §3: what a byte that continues a character holds under its mask, `10xxxxxx`.
+const CONTINUATION_PREFIX: u8 = 0x80;
+
+/// RFC 3629 §4: the first byte that leads a character of two bytes, `UTF8-2`.
+const FIRST_TWO_BYTE_LEAD: u8 = 0xC2;
+
+/// RFC 3629 §4: the last byte that leads a character of two bytes.
+const LAST_TWO_BYTE_LEAD: u8 = 0xDF;
+
+/// RFC 3629 §4: the first byte that leads a character of three bytes, `UTF8-3`.
+const FIRST_THREE_BYTE_LEAD: u8 = 0xE0;
+
+/// RFC 3629 §4: the last byte that leads a character of three bytes.
+const LAST_THREE_BYTE_LEAD: u8 = 0xEF;
+
+/// RFC 3629 §4: the first byte that leads a character of four bytes, `UTF8-4`.
+const FIRST_FOUR_BYTE_LEAD: u8 = 0xF0;
+
+/// RFC 3629 §4: the last byte that leads a character of four bytes, U+10FFFF's.
+const LAST_FOUR_BYTE_LEAD: u8 = 0xF4;
+
 // whether `byte` continues a UTF-8 character rather than starts one
 fn is_continuation(byte: u8) -> bool {
-    byte & 0xc0 == 0x80
+    byte & CONTINUATION_MASK == CONTINUATION_PREFIX
 }
 
 // the bytes of the character `byte` leads, as UTF-8 writes one (RFC 3629 §4): 2 to 4; 1 for any
 // other byte
 fn sequence_bytes_of(byte: u8) -> usize {
     match byte {
-        0xc2..=0xdf => 2,
-        0xe0..=0xef => 3,
-        0xf0..=0xf4 => 4,
+        FIRST_TWO_BYTE_LEAD..=LAST_TWO_BYTE_LEAD => 2,
+        FIRST_THREE_BYTE_LEAD..=LAST_THREE_BYTE_LEAD => 3,
+        FIRST_FOUR_BYTE_LEAD..=LAST_FOUR_BYTE_LEAD => 4,
         _ => 1,
     }
 }
@@ -1318,7 +1342,7 @@ pub fn write_header(
         )));
     }
 
-    assert_field("callId", (u64::from(header.call_id()), 0xffff_ffff))?;
+    assert_field("callId", (u64::from(header.call_id()), u64::from(u32::MAX)))?;
 
     let mut part: Vec<u8> = Vec::new();
     let mut destination_id = None;
@@ -1326,8 +1350,14 @@ pub fn write_header(
 
     match header {
         EnvelopeHeader::Request(request) => {
-            assert_field("serviceId", (u64::from(request.service_id), 0xffff))?;
-            assert_field("procedureId", (u64::from(request.procedure_id), 0xffff))?;
+            assert_field(
+                "serviceId",
+                (u64::from(request.service_id), u64::from(u16::MAX)),
+            )?;
+            assert_field(
+                "procedureId",
+                (u64::from(request.procedure_id), u64::from(u16::MAX)),
+            )?;
             part.extend(request.service_id.to_be_bytes());
             part.extend(request.procedure_id.to_be_bytes());
             destination_id = request.destination_id;
@@ -1348,7 +1378,10 @@ pub fn write_header(
     }
 
     if let Some(destination_id) = destination_id {
-        assert_field("destinationId", (u64::from(destination_id), 0xffff_ffff))?;
+        assert_field(
+            "destinationId",
+            (u64::from(destination_id), u64::from(u32::MAX)),
+        )?;
     }
 
     if let Some(total) = total {

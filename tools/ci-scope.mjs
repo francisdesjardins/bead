@@ -207,6 +207,7 @@ export const RULES = Object.freeze([
         'check-citations',
         'check-details',
         'check-byte-counts',
+        'check-wire-names',
         'check-names',
         'check-durations',
         'check-twins',
@@ -225,6 +226,11 @@ export const RULES = Object.freeze([
       'tools/fuzz/**',
     ],
     areas: ['commits'],
+  },
+  {
+    why: "the wire formats' names, whose modules each side's lint reads",
+    patterns: ['tools/wire-names.tsv'],
+    areas: ['commits', 'typescript', 'dotnet', 'rust'],
   },
   {
     why: 'the TypeScript release tarball and the tests of its preparation',
@@ -701,6 +707,7 @@ export const LOCAL = Object.freeze({
     }),
     step('.', 'node tools/check-details.mjs'),
     step('.', 'node tools/check-byte-counts.mjs'),
+    step('.', 'node tools/check-wire-names.mjs'),
     step('.', 'node site/check.mjs'),
     step('.', 'node --test "site/__tests__/*.test.mjs"'),
     step('.', 'node tools/check-names.mjs'),

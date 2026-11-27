@@ -1,4 +1,5 @@
 using System.Buffers;
+using System.Collections.Frozen;
 using System.Globalization;
 using System.Net.Security;
 using System.Security.Cryptography.X509Certificates;
@@ -39,6 +40,33 @@ public sealed class MqttBrokerAdapter : IBrokerAdapter, IAsyncDisposable
 
     // how often a Server Keep Alive shorter than its own is looked at, as MQTTnet looks at its own
     private static readonly TimeSpan PingCheck = TimeSpan.FromMilliseconds(250);
+
+    // MQTT 5.0 §3.2.2.2, Table 3-1: the name of each CONNACK Reason Code, code for code
+    private static readonly FrozenDictionary<int, string> ConnAckNames = new Dictionary<int, string>
+    {
+        [0x00] = "Success",
+        [0x80] = "Unspecified error",
+        [0x81] = "Malformed Packet",
+        [0x82] = "Protocol Error",
+        [0x83] = "Implementation specific error",
+        [0x84] = "Unsupported Protocol Version",
+        [0x85] = "Client Identifier not valid",
+        [0x86] = "Bad User Name or Password",
+        [0x87] = "Not authorized",
+        [0x88] = "Server unavailable",
+        [0x89] = "Server busy",
+        [0x8A] = "Banned",
+        [0x8C] = "Bad authentication method",
+        [0x90] = "Topic Name invalid",
+        [0x95] = "Packet too large",
+        [0x97] = "Quota exceeded",
+        [0x99] = "Payload format invalid",
+        [0x9A] = "Retain not supported",
+        [0x9B] = "QoS not supported",
+        [0x9C] = "Use another server",
+        [0x9D] = "Server moved",
+        [0x9F] = "Connection rate exceeded",
+    }.ToFrozenDictionary();
 
     private readonly MqttBrokerAdapterOptions _options;
     // * the platform's clock its own bounds of a platform run on: its connect timeout, its pinger
@@ -534,7 +562,7 @@ public sealed class MqttBrokerAdapter : IBrokerAdapter, IAsyncDisposable
 
         // * refused of 0x80 or more, its broker installed none; QoS 0 granted, refused all the
         // same, is one its broker holds, which its stop lets go
-        if ((int)code >= 0x80)
+        if ((int)code >= MqttPackets.FirstFailure)
         {
             Forget((link, key), held);
         }
@@ -725,7 +753,7 @@ public sealed class MqttBrokerAdapter : IBrokerAdapter, IAsyncDisposable
             return BrokerPublished.NoSubscriber;
         }
 
-        if (code >= 0x80)
+        if (code >= MqttPackets.FirstFailure)
         {
             throw new IOException(string.Create(CultureInfo.InvariantCulture, $"its broker refused the publication of {Id} to {topic}: PUBACK 0x{code:X2}"));
         }
@@ -1010,38 +1038,13 @@ public sealed class MqttBrokerAdapter : IBrokerAdapter, IAsyncDisposable
         }
     }
 
-    // the connect's options: one network connection that keeps no session, its id and its means
-    // MQTT 5.0 §3.2.2.2, Table 3-1: a CONNACK's Reason Code names.
+    // a CONNACK's Reason Code's name in MQTT 5.0 §3.2.2.2's Table 3-1, or none
     private static string? ConnAckNameOf(int code)
     {
-        return code switch
-        {
-            0x00 => "Success",
-            0x80 => "Unspecified error",
-            0x81 => "Malformed Packet",
-            0x82 => "Protocol Error",
-            0x83 => "Implementation specific error",
-            0x84 => "Unsupported Protocol Version",
-            0x85 => "Client Identifier not valid",
-            0x86 => "Bad User Name or Password",
-            0x87 => "Not authorized",
-            0x88 => "Server unavailable",
-            0x89 => "Server busy",
-            0x8A => "Banned",
-            0x8C => "Bad authentication method",
-            0x90 => "Topic Name invalid",
-            0x95 => "Packet too large",
-            0x97 => "Quota exceeded",
-            0x99 => "Payload format invalid",
-            0x9A => "Retain not supported",
-            0x9B => "QoS not supported",
-            0x9C => "Use another server",
-            0x9D => "Server moved",
-            0x9F => "Connection rate exceeded",
-            _ => null,
-        };
+        return ConnAckNames.GetValueOrDefault(code);
     }
 
+    // the connect's options: one network connection that keeps no session, its id and its means
     private MqttClientOptions OptionsOf((BrokerPublication? Will, string? Password) connect)
     {
         var (will, password) = connect;
@@ -1166,7 +1169,7 @@ public sealed class MqttBrokerAdapter : IBrokerAdapter, IAsyncDisposable
             // topic or QoS, none dropped as a duplicate, and dispatches each to the one handler
             // above while its link is up. It reads one it never dispatches only as its link ends, one
             // it cannot decode among them, and that end settles what waits on the count
-            if (inspected.Buffer is [var header, ..] && header >> 4 == MqttPackets.Publish)
+            if (inspected.Buffer is [var header, ..] && header >> MqttPackets.PacketTypeShift == MqttPackets.Publish)
             {
                 Interlocked.Increment(ref link.Received);
             }

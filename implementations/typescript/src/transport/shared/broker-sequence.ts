@@ -251,7 +251,7 @@ export const createBrokerParts = (
 
         return {
           lost: {
-            code: CloseCode.TOO_BIG,
+            code: CloseCode.MESSAGE_TOO_BIG,
             reason: `an envelope's parts would pass maximumEnvelopePartsBytes, ${byteCountOf(maximumEnvelopePartsBytes)}`,
           },
         };

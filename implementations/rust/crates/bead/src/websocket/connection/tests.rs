@@ -112,7 +112,7 @@ async fn settles_a_send_after_its_connection_ends_without_writing_or_holding_byt
             .unwrap();
 
         commands.send(Bytes::from_static(&[1, 2, 3]));
-        commands.close(NORMAL);
+        commands.close(NORMAL_CLOSURE);
         patience(PATIENCE, commands.ended()).await.unwrap();
 
         assert_eq!(commands.unsent_bytes(), 0, "nothing held");
@@ -177,7 +177,7 @@ async fn ends_a_read_without_delivering_data_once_the_socket_is_closed_or_closin
     let delivered = Delivered::default();
 
     // this side closes before anything is read: what comes is read to the peer's close, dropped
-    commands.close(NORMAL);
+    commands.close(NORMAL_CLOSURE);
 
     let mut frames = masked_frame(0x2, (&[1, 2], true));
 
@@ -262,7 +262,7 @@ async fn drops_a_connection_that_never_answers_its_close_once_close_timeout_has_
     let (connection, commands, _peer) =
         opened(bounds_of(None, Duration::from_millis(1)), 1_024).await;
 
-    commands.close(NORMAL);
+    commands.close(NORMAL_CLOSURE);
 
     let ended = patience(PATIENCE, connection.run(hooks_of(&Delivered::default())))
         .await

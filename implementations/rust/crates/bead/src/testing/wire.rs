@@ -35,7 +35,7 @@ pub const PING: u8 = 0x9;
 pub const PONG: u8 = 0xA;
 
 // the masking key of RFC 6455's examples, §5.7: fixed, so what the peer writes is the same each run
-const MASK: [u8; 4] = [0x37, 0xFA, 0x21, 0x3D];
+const MASKING_KEY: [u8; 4] = [0x37, 0xFA, 0x21, 0x3D];
 
 // a close that carries no code, RFC 6455 §7.1.5
 const NO_STATUS: u16 = 1_005;
@@ -481,11 +481,11 @@ impl Frame {
             frame.extend_from_slice(&u64::try_from(length).unwrap_or(u64::MAX).to_be_bytes());
         }
 
-        frame.extend_from_slice(&MASK);
+        frame.extend_from_slice(&MASKING_KEY);
         frame.extend(
             self.payload
                 .iter()
-                .zip(MASK.iter().cycle())
+                .zip(MASKING_KEY.iter().cycle())
                 .map(|(byte, key)| byte ^ key),
         );
 
@@ -563,7 +563,7 @@ impl FrameReader {
         };
         let is_masked = second & 0x80 != 0;
         let key_at = extended.checked_add(2)?;
-        let at = key_at.checked_add(if is_masked { MASK.len() } else { 0 })?;
+        let at = key_at.checked_add(if is_masked { MASKING_KEY.len() } else { 0 })?;
         let lengths = self.pending.get(2..key_at)?;
         let length = match extended {
             0 => usize::from(short),

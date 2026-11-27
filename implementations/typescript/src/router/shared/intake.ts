@@ -5,6 +5,14 @@
 import { laterTask } from '../../transport/shared/later-task';
 import type { Data } from '../../transport/shared/types';
 import type { IIntakeLimits } from './types';
+import {
+  FIRST_HIGH_SURROGATE,
+  FIRST_LOW_SURROGATE,
+  FIRST_THREE_BYTE_CODE_POINT,
+  FIRST_TWO_BYTE_CODE_POINT,
+  LAST_HIGH_SURROGATE,
+  SURROGATE_MASK,
+} from './unicode';
 
 // interfaces
 
@@ -46,14 +54,14 @@ const utf8LengthOf = (text: string): number => {
   for (let index = 0; index < text.length; index += 1) {
     const unit = text.charCodeAt(index);
 
-    if (unit < 0x80) {
+    if (unit < FIRST_TWO_BYTE_CODE_POINT) {
       length += 1;
-    } else if (unit < 0x800) {
+    } else if (unit < FIRST_THREE_BYTE_CODE_POINT) {
       length += 2;
     } else if (
-      unit >= 0xd800 &&
-      unit <= 0xdbff &&
-      (text.charCodeAt(index + 1) & 0xfc00) === 0xdc00
+      unit >= FIRST_HIGH_SURROGATE &&
+      unit <= LAST_HIGH_SURROGATE &&
+      (text.charCodeAt(index + 1) & SURROGATE_MASK) === FIRST_LOW_SURROGATE
     ) {
       length += 4;
       index += 1;

@@ -22,12 +22,10 @@ use tungstenite::protocol::frame::{Frame, FrameHeader};
 use crate::judgement::head::{MAXIMUM_HEAD_BYTES, MAXIMUM_HEAD_FIELDS};
 use crate::mqtt::link::{Address, READ_BYTES};
 use crate::net::dial::ClientSocket;
+use crate::websocket_frame::{LONGEST_CONTROL_PAYLOAD, OPCODE_MASK};
 
 // the subprotocol MQTT names over a WebSocket (MQTT 5.0 §6)
 const SUBPROTOCOL: &str = "mqtt";
-
-// the payload a control frame holds at most (RFC 6455 §5.5)
-const CONTROL_BYTES: u64 = 125;
 
 // ── Its frames, read ─────────────────────────────────────────────────────────────────────────
 
@@ -155,7 +153,7 @@ impl MqttFrameReader {
                 Ok(None) => return Ok(None),
                 // * the one refusal tungstenite's parse gives, a reserved opcode
                 Err(_) => {
-                    let opcode = bytes.first().map_or(0, |first| first & 0x0F);
+                    let opcode = bytes.first().map_or(0, |first| first & OPCODE_MASK);
 
                     return Err(MqttFrameRefusal::ReservedOpcode(opcode));
                 }
@@ -225,7 +223,7 @@ fn judge_head(head: &FrameHeader, length: u64) -> Result<(), MqttFrameRefusal> {
             return Err(MqttFrameRefusal::FragmentedControl);
         }
 
-        if length > CONTROL_BYTES {
+        if length > LONGEST_CONTROL_PAYLOAD {
             return Err(MqttFrameRefusal::LongControl);
         }
     }

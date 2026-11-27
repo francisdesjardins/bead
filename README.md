@@ -1142,6 +1142,12 @@ A clone needs Git 2.56 or newer for the repository's tools. CI's runners meet th
   `byte_count_of`, which writes "1 byte" at 1; a count interpolated right before `bytes` fails but
   for a constant above 1 the tool names. What another generator writes is left unread. Given
   files, those alone.
+- `node tools/check-wire-names.mjs`: each number a wire format's standard defines that a side reads
+  — RFC 6455's, MQTT 5's, AMQP 1.0's, protobuf's encoding, UTF-8's and UTF-16's, RFC 8259's — is a
+  row of `tools/wire-names.tsv`, and each name a row gives is defined exactly once in its module,
+  in its side's case and with the row's value, or the row says why the side reads no such number.
+  `--self` runs its own cases. Each side's lint holds the modules the table names: a hex or binary
+  literal stands only in a definition there.
 - `node tools/check-names.mjs`: each side's public names, read from its surface list — the
   TypeScript side's `surface.txt`, each C# project's `PublicAPI.Shipped.txt` with its Unshipped
   applied, the Rust side's `surfaces/` — are one on every side, or a row of `tools/names.tsv` says

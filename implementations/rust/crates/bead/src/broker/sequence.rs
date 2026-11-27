@@ -294,7 +294,7 @@ impl Parts {
             self.stop();
 
             return PartTaking::Lost(
-                codes::TOO_BIG,
+                codes::MESSAGE_TOO_BIG,
                 format!(
                     "an envelope's parts would pass maximumEnvelopePartsBytes, {}",
                     byte_count_of(self.bounds.maximum_envelope_parts_bytes)

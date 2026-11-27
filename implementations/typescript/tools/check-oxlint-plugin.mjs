@@ -1,9 +1,10 @@
 #!/usr/bin/env node
-// ── `bead/options-last` refuses exactly what its cases mark ──────────────────
-// Lints `oxlint-plugin.cases.ts` through the package's configuration, by way of
-// `oxlint-plugin.cases.oxlintrc.json`, and fails unless the lines `bead/options-last` refuses, at
-// `error`, are exactly the lines its cases mark: a refusal lost, or one where none is marked. A
-// floor of marks keeps a cases file emptied of them from passing.
+// ── The plugin's rules refuse exactly what their cases mark ──────────────────
+// Lints each rule's cases through the package's configuration, by way of the cases' own
+// configuration, and fails unless the lines the rule refuses, at `error`, are exactly the lines its
+// cases mark: a refusal lost, or one where none is marked. A floor of marks keeps a cases file
+// emptied of them from passing. `bead/wire-literal` must also fail the lint when a module it holds
+// is missing, or when it holds none, rather than pass it.
 //
 // Usage, from the package's folder; `yarn check` runs it as `yarn lint:cases`:
 //   node tools/check-oxlint-plugin.mjs
@@ -11,12 +12,25 @@
 import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { tableModulesOf, wireModulesOf } from './oxlint-plugin.mjs';
 
 const ROOT = process.cwd();
-const CASES = 'tools/oxlint-plugin.cases.ts';
-const CONFIG = 'tools/oxlint-plugin.cases.oxlintrc.json';
-const RULE = 'bead(options-last)';
-const FLOOR = 30;
+
+/** Each rule, its cases, the configuration they are linted through, and the floor of their marks. */
+const RULES = Object.freeze([
+  {
+    cases: 'tools/oxlint-plugin.cases.ts',
+    config: 'tools/oxlint-plugin.cases.oxlintrc.json',
+    floor: 30,
+    rule: 'bead(options-last)',
+  },
+  {
+    cases: 'tools/wire-literal.cases.ts',
+    config: 'tools/wire-literal.cases.oxlintrc.json',
+    floor: 20,
+    rule: 'bead(wire-literal)',
+  },
+]);
 
 /** The lines the cases mark refused: each the line below a `// refused:` comment of its own. */
 function markedLines(source) {
@@ -33,16 +47,16 @@ function markedLines(source) {
  * oxlint's report on the cases, as JSON. It exits 1 on what it refuses, so a failed run is read
  * too; one that never started throws, rather than reading as a clean lint.
  */
-function lint() {
+function lint({ cases, config }) {
   // through Node, as `check-examples.mjs` runs it: the `.bin` entry is a shell shim
   const args = [
     join(ROOT, 'node_modules', 'oxlint', 'bin', 'oxlint'),
     '-c',
-    CONFIG,
+    config,
     '--disable-nested-config',
     '-f',
     'json',
-    CASES,
+    cases,
   ];
   let output;
   try {
@@ -61,48 +75,103 @@ function lint() {
   return JSON.parse(output.slice(start));
 }
 
-const marked = markedLines(readFileSync(join(ROOT, CASES), 'utf8'));
-const { diagnostics = [], number_of_files: linted } = lint();
-const refusals = diagnostics.filter((diagnostic) => {
-  return diagnostic.code === RULE;
-});
-const refused = new Map(
-  refusals.map((diagnostic) => {
-    return [diagnostic.labels?.[0]?.span?.line, diagnostic.message];
-  })
-);
+/** What fails in one rule's verdicts on its cases, and how many lines they mark. */
+function verdictOf({ cases, config, floor, rule }) {
+  const marked = markedLines(readFileSync(join(ROOT, cases), 'utf8'));
+  const { diagnostics = [], number_of_files: linted } = lint({ cases, config });
+  const refusals = diagnostics.filter((diagnostic) => {
+    return diagnostic.code === rule;
+  });
+  const refused = new Map(
+    refusals.map((diagnostic) => {
+      return [diagnostic.labels?.[0]?.span?.line, diagnostic.message];
+    })
+  );
 
-const failures = [];
-if (linted !== 1) {
-  failures.push(
-    `oxlint linted ${String(linted)} files where the cases are one: the check is not running`
+  const failures = [];
+  if (linted !== 1) {
+    failures.push(
+      `${rule}: oxlint linted ${String(linted)} files where the cases are one: the check is not running`
+    );
+  }
+  if (marked.size < floor) {
+    failures.push(
+      `${rule}: the cases mark ${String(marked.size)} lines, under the floor of ${String(floor)}, so a pass here would mean nothing`
+    );
+  }
+  const severities = new Set(
+    refusals.map((diagnostic) => {
+      return diagnostic.severity;
+    })
   );
+  for (const severity of severities) {
+    if (severity !== 'error') {
+      failures.push(`${rule} reports at ${String(severity)}, where the lint holds it at error`);
+    }
+  }
+  for (const line of marked) {
+    if (!refused.has(line)) {
+      failures.push(`${cases}:${String(line)} — marked refused, and accepted`);
+    }
+  }
+  for (const [line, message] of refused) {
+    if (!marked.has(line)) {
+      failures.push(`${cases}:${String(line)} — refused, and not marked: ${message}`);
+    }
+  }
+  return { failures, marks: marked.size, rule };
 }
-if (marked.size < FLOOR) {
-  failures.push(
-    `the cases mark ${String(marked.size)} lines, under the floor of ${String(FLOOR)}, so a pass here would mean nothing`
+
+/** Whether `wireModulesOf` throws, as the rule must on what would leave it holding nothing. */
+function throws(options) {
+  try {
+    wireModulesOf(options);
+  } catch {
+    return true;
+  }
+  return false;
+}
+
+/** What fails in how `bead/wire-literal` reads its modules, the table's grammar among it. */
+function moduleFailures() {
+  const failures = [];
+  const row = (cell) => {
+    return ['websocket', 'FIN_BIT', 'RFC 6455 §5.2', '0x80', cell, '-: none', '-: none'].join('\t');
+  };
+  const read = tableModulesOf(
+    [
+      '# format\tconcept\tstandard\tvalue\ttypescript\tcsharp\trust',
+      row('implementations/typescript/a.ts'),
+      row('implementations/typescript/a.ts#Holder.MEMBER, implementations/typescript/b.ts'),
+      row('-: a reason, with a comma, and implementations/typescript/c.ts'),
+      '',
+    ].join('\n')
   );
-}
-const severities = new Set(
-  refusals.map((diagnostic) => {
-    return diagnostic.severity;
-  })
-);
-for (const severity of severities) {
-  if (severity !== 'error') {
-    failures.push(`${RULE} reports at ${String(severity)}, where the lint holds it at error`);
+  if (read.join(' ') !== 'implementations/typescript/a.ts implementations/typescript/b.ts') {
+    failures.push(`bead(wire-literal): a table's TypeScript column reads as ${read.join(', ')}`);
   }
-}
-for (const line of marked) {
-  if (!refused.has(line)) {
-    failures.push(`${CASES}:${String(line)} — marked refused, and accepted`);
+  if (!throws({ modules: ['tools/no-such-module.ts'] })) {
+    failures.push('bead(wire-literal): a module missing passes, where it must fail the lint');
   }
-}
-for (const [line, message] of refused) {
-  if (!marked.has(line)) {
-    failures.push(`${CASES}:${String(line)} — refused, and not marked: ${message}`);
+  if (!throws({ modules: [] })) {
+    failures.push('bead(wire-literal): no module at all passes, where it must fail the lint');
   }
+  if (!throws({ table: 'tools/no-such-table.tsv' })) {
+    failures.push('bead(wire-literal): a table missing passes, where it must fail the lint');
+  }
+  if (throws({})) {
+    failures.push("bead(wire-literal): the root's table names a module that is missing");
+  }
+  return failures;
 }
+
+const verdicts = RULES.map(verdictOf);
+const failures = [
+  ...verdicts.flatMap((verdict) => {
+    return verdict.failures;
+  }),
+  ...moduleFailures(),
+];
 
 if (failures.length > 0) {
   console.error(`check-oxlint-plugin: ${String(failures.length)} failure(s).`);
@@ -112,6 +181,8 @@ if (failures.length > 0) {
   process.exit(1);
 }
 
-console.log(
-  `check-oxlint-plugin: ${RULE} refuses the ${String(marked.size)} lines its cases mark, and no other`
-);
+for (const { marks, rule } of verdicts) {
+  console.log(
+    `check-oxlint-plugin: ${rule} refuses the ${String(marks)} lines its cases mark, and no other`
+  );
+}

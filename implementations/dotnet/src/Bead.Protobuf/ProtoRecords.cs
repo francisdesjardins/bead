@@ -42,13 +42,50 @@ public static class ProtoRecords
     /// <summary>A reader's and a writer's reason for a message that leaves a required field unset.</summary>
     internal const string RequiredUnset = "a required field unset";
 
-    // the wire types of protobuf's Encoding guide
+    /// <summary>Protocol Buffers Encoding, Message Structure: the wire type of a varint.</summary>
     private const int Varint = 0;
-    private const int Fixed64 = 1;
-    private const int Delimited = 2;
-    private const int StartGroup = 3;
-    private const int EndGroup = 4;
-    private const int Fixed32 = 5;
+
+    /// <summary>Protocol Buffers Encoding, Message Structure: the wire type of a fixed 64-bit value.</summary>
+    private const int I64 = 1;
+
+    /// <summary>Protocol Buffers Encoding, Message Structure: the wire type of a length-delimited record.</summary>
+    private const int Len = 2;
+
+    /// <summary>Protocol Buffers Encoding, Message Structure: the wire type of a group's start, deprecated.</summary>
+    private const int SGroup = 3;
+
+    /// <summary>Protocol Buffers Encoding, Message Structure: the wire type of a group's end, deprecated.</summary>
+    private const int EGroup = 4;
+
+    /// <summary>Protocol Buffers Encoding, Message Structure: the wire type of a fixed 32-bit value.</summary>
+    private const int I32 = 5;
+
+    /// <summary>Protocol Buffers Encoding, Message Structure: a tag's wire type, its low three bits.</summary>
+    private const int WireTypeMask = 7;
+
+    /// <summary>Protocol Buffers Encoding, Message Structure: where a tag holds its field number, above its wire type.</summary>
+    private const int FieldNumberShift = 3;
+
+    /// <summary>Protocol Buffers Encoding, Base 128 Varints: the most significant bit, set on each byte but a varint's last.</summary>
+    private const int ContinuationBit = 0x80;
+
+    /// <summary>Protocol Buffers Encoding, Base 128 Varints: the lower 7 bits of a byte, its digit.</summary>
+    private const int DigitMask = 0x7F;
+
+    /// <summary>Protocol Buffers Encoding, Base 128 Varints: the bits of a digit, 7 a byte.</summary>
+    private const int DigitBits = 7;
+
+    /// <summary>Protocol Buffers Encoding, Base 128 Varints: the longest varint, 10 bytes, for 64 bits.</summary>
+    private const int LongestVarint = 10;
+
+    /// <summary>Protocol Buffers Encoding, Message Structure: the longest tag, a varint within 32 bits, 5 bytes.</summary>
+    private const int LongestTag = 5;
+
+    /// <summary>Protocol Buffers Encoding, Base 128 Varints: the largest 10th byte of a varint within 64 bits, its one bit.</summary>
+    private const int LargestLastByte64 = 0x01;
+
+    /// <summary>Protocol Buffers Encoding, Message Structure: the largest 5th byte of a tag within 32 bits, its four bits.</summary>
+    private const int LargestLastByte32 = 0x0F;
 
     // each message's shape, built once from its descriptor and held as long as the descriptor is
     private static readonly ConditionalWeakTable<MessageDescriptor, Shape> Shapes = [];
@@ -129,14 +166,14 @@ public static class ProtoRecords
             Own = WireTypeOf(field.FieldType);
             Width = Own switch
             {
-                Fixed64 => 8,
-                Fixed32 => 4,
+                I64 => 8,
+                I32 => 4,
                 _ => 0,
             };
 
             // * a repeated scalar of a numeric type takes its own wire type and the length-delimited,
             // packed or not, as protobuf's parsers must (Encoding, "Packed Repeated Fields")
-            IsPackable = field.IsRepeated && Own is Varint or Fixed64 or Fixed32;
+            IsPackable = field.IsRepeated && Own is Varint or I64 or I32;
 
             if (field.FieldType is FieldType.Message or FieldType.Group)
             {
@@ -189,17 +226,17 @@ public static class ProtoRecords
         /// <summary>Whether a record at <paramref name="wireType"/> is one of its type's.</summary>
         public bool Takes(int wireType)
         {
-            return wireType == Own || (IsPackable && wireType == Delimited);
+            return wireType == Own || (IsPackable && wireType == Len);
         }
 
         private static int WireTypeOf(FieldType type)
         {
             return type switch
             {
-                FieldType.Double or FieldType.Fixed64 or FieldType.SFixed64 => Fixed64,
-                FieldType.Float or FieldType.Fixed32 or FieldType.SFixed32 => Fixed32,
-                FieldType.String or FieldType.Bytes or FieldType.Message => Delimited,
-                FieldType.Group => StartGroup,
+                FieldType.Double or FieldType.Fixed64 or FieldType.SFixed64 => I64,
+                FieldType.Float or FieldType.Fixed32 or FieldType.SFixed32 => I32,
+                FieldType.String or FieldType.Bytes or FieldType.Message => Len,
+                FieldType.Group => SGroup,
                 _ => Varint,
             };
         }
@@ -491,15 +528,15 @@ public static class ProtoRecords
             while (_at < frame.End)
             {
                 var tag = Tag(frame.End);
-                var number = (int)(tag >> 3);
-                var wireType = (int)(tag & 7);
+                var number = (int)(tag >> FieldNumberShift);
+                var wireType = (int)(tag & WireTypeMask);
 
                 if (number == 0)
                 {
                     throw Refused("field number 0");
                 }
 
-                if (wireType == EndGroup)
+                if (wireType == EGroup)
                 {
                     if (number == frame.Group)
                     {
@@ -545,7 +582,7 @@ public static class ProtoRecords
         private void Record(FieldShape? field, (uint Tag, Frame Frame) record)
         {
             var (tag, frame) = record;
-            var wireType = (int)(tag & 7);
+            var wireType = (int)(tag & WireTypeMask);
 
             switch (wireType)
             {
@@ -560,13 +597,13 @@ public static class ProtoRecords
                     }
 
                     break;
-                case Fixed64:
+                case I64:
                     Skip(8, frame.End);
                     break;
-                case Fixed32:
+                case I32:
                     Skip(4, frame.End);
                     break;
-                case Delimited:
+                case Len:
                     var end = Length(frame.End);
 
                     if (field?.Message is { } message)
@@ -585,9 +622,9 @@ public static class ProtoRecords
                     }
 
                     break;
-                case StartGroup:
+                case SGroup:
                     // * an unknown group is walked as a message every field of which is unknown
-                    Message(field?.Message ?? Shape.Unknown, new Frame(frame.End, Deeper(frame), (int)(tag >> 3)));
+                    Message(field?.Message ?? Shape.Unknown, new Frame(frame.End, Deeper(frame), (int)(tag >> FieldNumberShift)));
                     break;
                 default:
                     throw Refused($"the wire type {wireType}");
@@ -656,7 +693,7 @@ public static class ProtoRecords
         {
             var value = 0UL;
 
-            for (var index = 0; index < 10; index++)
+            for (var index = 0; index < LongestVarint; index++)
             {
                 if (_at >= end)
                 {
@@ -665,13 +702,13 @@ public static class ProtoRecords
 
                 var each = _bytes[_at++];
 
-                value |= (ulong)(each & 0x7F) << (7 * index);
+                value |= (ulong)(each & DigitMask) << (DigitBits * index);
 
-                if ((each & 0x80) == 0)
+                if ((each & ContinuationBit) == 0)
                 {
                     // ! a 10th byte past 0x01 sets a bit past the 64th: no unsigned 64-bit integer, so
                     // no encoding, refused here before Google.Protobuf drops those bits
-                    if (index == 9 && each > 0x01)
+                    if (index == LongestVarint - 1 && each > LargestLastByte64)
                     {
                         throw Refused("a varint past 64 bits");
                     }
@@ -688,7 +725,7 @@ public static class ProtoRecords
         {
             var value = 0U;
 
-            for (var index = 0; index < 5; index++)
+            for (var index = 0; index < LongestTag; index++)
             {
                 if (_at >= end)
                 {
@@ -697,14 +734,14 @@ public static class ProtoRecords
 
                 var each = _bytes[_at++];
 
-                if (index == 4 && each > 0x0F)
+                if (index == LongestTag - 1 && each > LargestLastByte32)
                 {
                     throw Refused("a tag of more than 5 bytes, or past 32 bits");
                 }
 
-                value |= (uint)(each & 0x7F) << (7 * index);
+                value |= (uint)(each & DigitMask) << (DigitBits * index);
 
-                if ((each & 0x80) == 0)
+                if ((each & ContinuationBit) == 0)
                 {
                     return value;
                 }
@@ -732,11 +769,11 @@ public static class ProtoRecords
                 var start = _at;
                 var tag = Next();
                 var tagEnd = _at;
-                var field = shape.FieldOf((int)(tag >> 3));
+                var field = shape.FieldOf((int)(tag >> FieldNumberShift));
 
-                switch ((int)(tag & 7))
+                switch ((int)(tag & WireTypeMask))
                 {
-                    case EndGroup:
+                    case EGroup:
                         output.Write(_bytes[start.._at]);
 
                         return;
@@ -749,13 +786,13 @@ public static class ProtoRecords
                         }
 
                         break;
-                    case Fixed64:
+                    case I64:
                         _at += 8;
                         break;
-                    case Fixed32:
+                    case I32:
                         _at += 4;
                         break;
-                    case Delimited:
+                    case Len:
                         var length = (int)Next();
                         var delimitedEnd = _at + length;
 
@@ -776,7 +813,7 @@ public static class ProtoRecords
                     default:
                         // * a group: its tag, then its records through its end group
                         output.Write(_bytes[start..tagEnd]);
-                        Message(field?.Message ?? Shape.Unknown, ((end, (int)(tag >> 3)), output));
+                        Message(field?.Message ?? Shape.Unknown, ((end, (int)(tag >> FieldNumberShift)), output));
 
                         continue;
                 }
@@ -794,8 +831,8 @@ public static class ProtoRecords
 
             for (var index = 0; index < size; index += 1)
             {
-                span[index] = (byte)(index == size - 1 ? value : (value & 0x7F) | 0x80);
-                value >>= 7;
+                span[index] = (byte)(index == size - 1 ? value : (value & DigitMask) | ContinuationBit);
+                value >>= DigitBits;
             }
 
             output.Advance(size);
@@ -806,13 +843,13 @@ public static class ProtoRecords
         {
             var value = 0UL;
 
-            for (var shift = 0; ; shift += 7)
+            for (var shift = 0; ; shift += DigitBits)
             {
                 var each = _bytes[_at++];
 
-                value |= (ulong)(each & 0x7F) << shift;
+                value |= (ulong)(each & DigitMask) << shift;
 
-                if ((each & 0x80) == 0)
+                if ((each & ContinuationBit) == 0)
                 {
                     return value;
                 }
