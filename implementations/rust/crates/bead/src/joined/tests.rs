@@ -56,6 +56,14 @@ fn january_first() -> SystemTime {
     SystemTime::UNIX_EPOCH
 }
 
+// the words a join of `transports` is refused in
+fn refusal_of(transports: Vec<Arc<dyn ServerTransport>>) -> String {
+    JoinedServerTransport::new(transports)
+        .expect_err("refused")
+        .message()
+        .to_owned()
+}
+
 // a WebSocket-typed transport of the tests' own: its flags as a test sets them, its events told
 // when a test asks, and each of its calls recorded
 struct Paired {
@@ -719,17 +727,13 @@ async fn refuses_to_join_two_transports_of_one_type() {
         MemoryTransportServer::new(&MemoryTransportServerOptions::default()).expect("a server");
     let paired = Arc::new(Paired::default());
 
-    assert!(
-        JoinedServerTransport::new(vec![
+    assert_eq!(
+        refusal_of(vec![
             Arc::new(first.clone()),
             Arc::<Paired>::clone(&paired),
             Arc::new(second),
-        ])
-        .expect_err("refused")
-        .message()
-        .starts_with(
-            "a join takes one transport of each type: two are MEMORY, whose handles might be one"
-        ),
+        ]),
+        "a join takes one transport of each type: two are MEMORY, whose handles might be one",
         "two of one type"
     );
 
@@ -738,11 +742,16 @@ async fn refuses_to_join_two_transports_of_one_type() {
     let joined = JoinedServerTransport::new(vec![Arc::new(first)]).expect("a join");
 
     assert_eq!(joined.transport_type(), None, "no type of its own");
-    assert!(
-        JoinedServerTransport::new(vec![Arc::new(joined), Arc::<Paired>::clone(&paired)]).is_err(),
+    assert_eq!(
+        refusal_of(vec![Arc::new(joined), Arc::<Paired>::clone(&paired)]),
+        "a join takes transports that name the type of their handles, never a join",
         "a join among them"
     );
-    assert!(JoinedServerTransport::new(Vec::new()).is_err(), "none");
+    assert_eq!(
+        refusal_of(Vec::new()),
+        "a join takes one transport at least",
+        "none"
+    );
 
     let clock = SteppingClock::new(january_first());
     let shared: SharedClock = Arc::<SteppingClock>::clone(&clock);
@@ -754,15 +763,15 @@ async fn refuses_to_join_two_transports_of_one_type() {
     .expect("a server");
     let other: SharedClock = SteppingClock::new(january_first());
 
-    assert!(
-        JoinedServerTransport::new(vec![
+    assert_eq!(
+        refusal_of(vec![
             Arc::new(Paired {
                 clock: other,
                 ..Paired::default()
             }),
             Arc::new(elsewhere.clone()),
-        ])
-        .is_err(),
+        ]),
+        "a join's transports run on one clock",
         "two clocks"
     );
 
@@ -777,6 +786,51 @@ async fn refuses_to_join_two_transports_of_one_type() {
     .expect("a join");
 
     assert!(Arc::ptr_eq(&together.clock(), &shared), "its one clock");
+}
+
+// spec 15.14
+#[tokio::test]
+async fn refuses_a_join_for_the_first_of_its_rules_any_transport_breaks_in_the_order_the_rules_are_stated()
+ {
+    let first: SharedClock = SteppingClock::new(january_first());
+    let second: SharedClock = SteppingClock::new(january_first());
+    let of = |kind: &'static str, clock: &SharedClock| -> Arc<dyn ServerTransport> {
+        Arc::new(Paired {
+            kind,
+            clock: Arc::clone(clock),
+            ..Paired::default()
+        })
+    };
+    let a = of("A", &first);
+    let b = of("B", &second);
+    let join: Arc<dyn ServerTransport> =
+        Arc::new(JoinedServerTransport::new(vec![of("C", &first)]).expect("a join"));
+
+    // * each rule is judged over every transport before the next: a later rule's refusal means
+    // every earlier one holds
+    assert_eq!(
+        [
+            refusal_of(vec![Arc::clone(&a), Arc::clone(&b), Arc::clone(&a)]),
+            refusal_of(vec![Arc::clone(&a), Arc::clone(&a), Arc::clone(&join)]),
+            refusal_of(vec![Arc::clone(&a), Arc::clone(&b), Arc::clone(&join)]),
+            refusal_of(vec![Arc::clone(&a), of("A", &second)]),
+            refusal_of(vec![
+                Arc::clone(&a),
+                Arc::clone(&b),
+                Arc::clone(&b),
+                Arc::clone(&a),
+            ]),
+            refusal_of(Vec::new()),
+        ],
+        [
+            "a join takes one transport of each type: two are A, whose handles might be one",
+            "a join takes transports that name the type of their handles, never a join",
+            "a join takes transports that name the type of their handles, never a join",
+            "a join takes one transport of each type: two are A, whose handles might be one",
+            "a join takes one transport of each type: two are B, whose handles might be one",
+            "a join takes one transport at least",
+        ]
+    );
 }
 
 // spec 15.14

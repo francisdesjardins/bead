@@ -227,31 +227,47 @@ impl JoinedServerTransport {
     ///
     /// # Errors
     ///
-    /// A [`ProgrammerError`] for none, one that names no type — a join among them — two of one type,
-    /// and two on different clocks, two platform clocks on one runtime being one.
+    /// A [`ProgrammerError`] for the first of its rules that any transport breaks, each judged over
+    /// every transport before the next: none given, one that names no type — a join among them —
+    /// two of one type, the first type given again named, and one on another clock than the
+    /// first's, two platform clocks on one runtime being one. Each transport's type is read once,
+    /// in the order given, and only then each one's clock, once, in the same order.
     pub fn new(transports: Vec<Arc<dyn ServerTransport>>) -> Result<Self, ProgrammerError> {
         let Some(first) = transports.first() else {
             return Err(ProgrammerError::new("a join takes one transport at least"));
         };
-        let clock = first.clock();
+
+        // * each rule is judged over every transport before the next, so a later rule's refusal
+        // means every earlier one holds (spec 15.14)
+        let kinds: Vec<Option<String>> = transports
+            .iter()
+            .map(|transport| transport.transport_type().map(str::to_owned))
+            .collect();
+
+        if kinds.iter().any(Option::is_none) {
+            return Err(ProgrammerError::new(
+                "a join takes transports that name the type of their handles, never a join",
+            ));
+        }
 
         let mut by_type: HashMap<String, usize> = HashMap::new();
 
-        for (index, transport) in transports.iter().enumerate() {
-            let Some(kind) = transport.transport_type() else {
-                return Err(ProgrammerError::new(
-                    "a join takes transports that name the type of their handles, never a join",
-                ));
-            };
-
+        // every transport names its type here, so each index is its transport's
+        for (index, kind) in kinds.into_iter().flatten().enumerate() {
             // ! a handle tells two types apart, never two transports of one type, whose ranks each
             // count from 1 (decision 0025)
-            if by_type.insert(kind.to_owned(), index).is_some() {
+            if by_type.contains_key(&kind) {
                 return Err(ProgrammerError::new(format!(
                     "a join takes one transport of each type: two are {kind}, whose handles might be one"
                 )));
             }
 
+            by_type.insert(kind, index);
+        }
+
+        let clock = first.clock();
+
+        for transport in transports.iter().skip(1) {
             if !crate::clock::is_same(&clock, &transport.clock()) {
                 return Err(ProgrammerError::new("a join's transports run on one clock"));
             }
