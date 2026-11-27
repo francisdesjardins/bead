@@ -121,6 +121,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   later than the acknowledgements read after it, so a group member that stopped could see its name
   let go before an OPEN that came first. It then refused that OPEN 503 once its link was stopping,
   the REFUSE never went, and the client waited out its connect.
+- The C# AMQP 1.0 adapter holds a name it attaches again, after its broker ended its receiver,
+  before that receiver gets credit. An unsubscription at that moment no longer settles at once while
+  a message the receiver took is still on its way to its participant.
 
 ## [0.17.0] - 2026-11-24
 

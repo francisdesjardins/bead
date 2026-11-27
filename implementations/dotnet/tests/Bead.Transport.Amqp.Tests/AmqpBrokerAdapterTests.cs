@@ -1480,6 +1480,12 @@ public sealed class AmqpBrokerAdapterTests : IAsyncLifetime
             from: mark);
         await Task.Delay(100, Cancelled);
         Assert.Equal((true, 2), (adapter.IsLinked, downs.Count));
+
+        // * and given no credit, let go before it was held
+        Assert.DoesNotContain(letting.Frames.Skip(mark), (frame) =>
+        {
+            return frame.Channel == reattaching.Channel && frame.Performative is Flow { HasHandle: true };
+        });
         await adapter.Stop();
     }
 

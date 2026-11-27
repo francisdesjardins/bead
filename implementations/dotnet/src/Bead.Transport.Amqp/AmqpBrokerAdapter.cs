@@ -471,7 +471,7 @@ public sealed class AmqpBrokerAdapter : IBrokerAdapter, IAsyncDisposable
 
         try
         {
-            var receiving = await Asked((link, token), ReceiverOf((link, topic, key), token));
+            var receiving = await Asked((link, token), ReceiverOf((link, topic, key, IsAgain: false), token));
 
             lock (_gate)
             {
@@ -1416,7 +1416,7 @@ public sealed class AmqpBrokerAdapter : IBrokerAdapter, IAsyncDisposable
                 await management.Close((_options.ConnectTimeout, _platform));
             }
 
-            return await ReceiverOf((link, topic, queue), linked.Token);
+            return await ReceiverOf((link, topic, queue, IsAgain: false), linked.Token);
         }
         catch (Exception reason) when (link.IsStopping)
         {
@@ -1438,10 +1438,11 @@ public sealed class AmqpBrokerAdapter : IBrokerAdapter, IAsyncDisposable
     }
 
     // a receiver of a topic's queue on a session of its own, held once its ATTACH named its source
-    // and its credit went; its session ended where it is refused or given up
-    private async Task<Receiving> ReceiverOf((Incarnation Link, IReadOnlyList<string> Topic, string Queue) asked, CancellationToken token)
+    // and its credit went; its session ended where it is refused or given up. A name attached again
+    // is its link's before its credit goes, or, let go as it attached, given none
+    private async Task<Receiving> ReceiverOf((Incarnation Link, IReadOnlyList<string> Topic, string Queue, bool IsAgain) asked, CancellationToken token)
     {
-        var (link, topic, name) = asked;
+        var (link, topic, name, isAgain) = asked;
         var (session, begun) = AmqpEndpoints.Begin(link.Connection!);
         var isOwn = name == AmqpMessages.TopicOf(topic);
         var receiving = new Receiving((topic, name), session) { IsInbox = IsInbox(topic) && isOwn, IsServed = !IsInbox(topic) && isOwn, Bound = ReceiveBound(topic) };
@@ -1478,6 +1479,36 @@ public sealed class AmqpBrokerAdapter : IBrokerAdapter, IAsyncDisposable
             if (attach.Source is null)
             {
                 throw new IOException($"its broker refused the subscription of {Id} to {queue}: {AmqpEndpoints.ReasonOf(await AmqpEndpoints.EndOf(receiver).WaitAsync(token))}");
+            }
+
+            // ! a name attached again is held before its credit goes: from then on, an unsubscription
+            // finds it and lets it go by its DETACH, which its connection's reader reads only after
+            // each message it read before, so that no OPEN reaches its participant once its let-go
+            // settled (spec 15.21). One let go as it attached is given no credit, and its session ends
+            if (isAgain)
+            {
+                bool isHeld;
+
+                lock (_gate)
+                {
+                    isHeld = !link.IsEnded && !link.LetGo.Contains(name);
+
+                    if (isHeld)
+                    {
+                        link.Names[name] = receiving;
+                    }
+                    else
+                    {
+                        receiving.IsLetGo = true;
+                    }
+                }
+
+                if (!isHeld)
+                {
+                    AmqpEndpoints.CloseAtOnce(session);
+
+                    return receiving;
+                }
             }
 
             // * its credit its own: none restored by the library, one more as each message is settled;
@@ -1576,28 +1607,10 @@ public sealed class AmqpBrokerAdapter : IBrokerAdapter, IAsyncDisposable
         {
             using var timeout = new CancellationTokenSource(_options.ConnectTimeout, _platform);
             using var linked = CancellationTokenSource.CreateLinkedTokenSource(timeout.Token, link.Life.Token);
-            var again = await ReceiverOf((link, topic, key), linked.Token);
-            bool isLetGo;
 
-            lock (_gate)
-            {
-                // ! a name let go meanwhile is never attached again
-                isLetGo = link.IsEnded || link.LetGo.Contains(key);
-
-                if (!isLetGo)
-                {
-                    link.Names[key] = again;
-                }
-                else
-                {
-                    again.IsLetGo = true;
-                }
-            }
-
-            if (isLetGo)
-            {
-                AmqpEndpoints.CloseAtOnce(again.Session);
-            }
+            // ! held before its credit goes, as ReceiverOf says: held after it, an unsubscription in
+            // between would find no receiver and settle at once, a message already through the gate
+            await ReceiverOf((link, topic, key, IsAgain: true), linked.Token);
         }
         catch (Exception reason) when (reason is not OutOfMemoryException)
         {
