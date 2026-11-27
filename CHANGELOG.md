@@ -124,6 +124,12 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - The C# AMQP 1.0 adapter holds a name it attaches again, after its broker ended its receiver,
   before that receiver gets credit. An unsubscription at that moment no longer settles at once while
   a message the receiver took is still on its way to its participant.
+- The C# AMQP 1.0 adapter ends at once the session of a name it attaches again when an
+  unsubscription meets it before its ATTACH is answered, as the TypeScript side does. A subscription
+  as it attaches again, after such an unsubscription or not, now holds one receiver of the name.
+  The receiver attached again took credit too, and the next let-go left it attached.
+- The TypeScript AMQP 1.0 adapter gives no credit to a receiver whose ATTACH is answered after its
+  session's END went. It sent a FLOW after that END, which AMQP 1.0 §2.5.5 forbids.
 
 ## [0.17.0] - 2026-11-24
 

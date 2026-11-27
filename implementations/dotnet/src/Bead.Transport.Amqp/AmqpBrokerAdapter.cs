@@ -423,7 +423,8 @@ public sealed class AmqpBrokerAdapter : IBrokerAdapter, IAsyncDisposable
 
             lock (_gate)
             {
-                if (link.Names.ContainsKey(key))
+                // * one attached again after its broker ended it is held all the same
+                if (link.Names.ContainsKey(key) || link.Reattachments.ContainsKey(key))
                 {
                     return;
                 }
@@ -432,7 +433,7 @@ public sealed class AmqpBrokerAdapter : IBrokerAdapter, IAsyncDisposable
                 {
                     // ! a session each name: one past what its broker's channel-max leaves beside the
                     // inbox's, the senders' and the management's is refused before it begins one
-                    if (link.Names.Count + link.Pending.Count + 1 + SessionsBesideNames > link.ChannelMax + 1)
+                    if (link.Names.Count + link.Pending.Count + link.Reattachments.Count + 1 + SessionsBesideNames > link.ChannelMax + 1)
                     {
                         throw new IOException(string.Create(CultureInfo.InvariantCulture, $"its broker's channel-max, {link.ChannelMax}, leaves the link of {Id} no session for its name {key}: it serves {link.Names.Count} names"));
                     }
@@ -471,7 +472,7 @@ public sealed class AmqpBrokerAdapter : IBrokerAdapter, IAsyncDisposable
 
         try
         {
-            var receiving = await Asked((link, token), ReceiverOf((link, topic, key, IsAgain: false), token));
+            var receiving = await Asked((link, token), ReceiverOf((link, topic, key, Again: null), token));
 
             lock (_gate)
             {
@@ -512,7 +513,8 @@ public sealed class AmqpBrokerAdapter : IBrokerAdapter, IAsyncDisposable
     /// Lets the subscription to <paramref name="topic"/> go (spec 15.34). A name's within its connect
     /// timeout: once what it handed on was settled, none handed on after, and its receiver's DETACH
     /// came, its session then ended; past that bound its link is lost, an <see cref="IOException"/>.
-    /// A name's subscription under way, once its ATTACH is answered, never held. Its inbox once its
+    /// A name's subscription under way, once its ATTACH is answered, never held. A name its broker
+    /// ended, attached again and given no credit yet, at once, its session ended. Its inbox once its
     /// broker's management deleted it, answered 200 within its connect timeout, what comes meanwhile
     /// handed on and credited, its receiver detached with it, which tells no loss; a refusal an
     /// <see cref="IOException"/>, and no answer within it a <see cref="TimeoutException"/>, its inbox
@@ -570,6 +572,7 @@ public sealed class AmqpBrokerAdapter : IBrokerAdapter, IAsyncDisposable
 
         Receiving? receiving;
         Task<Receiving>? pending = null;
+        var isReattaching = false;
 
         lock (_gate)
         {
@@ -580,10 +583,32 @@ public sealed class AmqpBrokerAdapter : IBrokerAdapter, IAsyncDisposable
             {
                 receiving.IsLetGo = true;
             }
+            else if (link.Reattachments.Remove(key, out var again))
+            {
+                isReattaching = true;
+                again.IsLetGo = true;
+                receiving = again.Receiving;
+
+                if (receiving is not null)
+                {
+                    receiving.IsLetGo = true;
+                }
+            }
             else
             {
                 link.Pending.TryGetValue(key, out pending);
             }
+        }
+
+        // ! a name attached again, given no credit yet, so that nothing of it was handed on: let go at
+        // once, its session ended whether or not its ATTACH was answered, and never given credit. A
+        // session that sent its END still reads what its broker sent before it, a late ATTACH among
+        // it (AMQP 1.0 §2.5.5)
+        if (isReattaching)
+        {
+            AmqpEndpoints.CloseAtOnce(receiving?.Session);
+
+            return;
         }
 
         // * a subscription under way, met: never held, and let go once its ATTACH is answered
@@ -1416,7 +1441,7 @@ public sealed class AmqpBrokerAdapter : IBrokerAdapter, IAsyncDisposable
                 await management.Close((_options.ConnectTimeout, _platform));
             }
 
-            return await ReceiverOf((link, topic, queue, IsAgain: false), linked.Token);
+            return await ReceiverOf((link, topic, queue, Again: null), linked.Token);
         }
         catch (Exception reason) when (link.IsStopping)
         {
@@ -1440,17 +1465,29 @@ public sealed class AmqpBrokerAdapter : IBrokerAdapter, IAsyncDisposable
     // a receiver of a topic's queue on a session of its own, held once its ATTACH named its source
     // and its credit went; its session ended where it is refused or given up. A name attached again
     // is its link's before its credit goes, or, let go as it attached, given none
-    private async Task<Receiving> ReceiverOf((Incarnation Link, IReadOnlyList<string> Topic, string Queue, bool IsAgain) asked, CancellationToken token)
+    private async Task<Receiving> ReceiverOf((Incarnation Link, IReadOnlyList<string> Topic, string Queue, Reattachment? Again) asked, CancellationToken token)
     {
-        var (link, topic, name, isAgain) = asked;
+        var (link, topic, name, again) = asked;
         var (session, begun) = AmqpEndpoints.Begin(link.Connection!);
         var isOwn = name == AmqpMessages.TopicOf(topic);
         var receiving = new Receiving((topic, name), session) { IsInbox = IsInbox(topic) && isOwn, IsServed = !IsInbox(topic) && isOwn, Bound = ReceiveBound(topic) };
         var queue = AmqpMessages.QueueAddressOf(name);
 
+        // * one attached again, let go before its session began: that session ended at once
+        if (again is not null && !Stands((link, again, receiving), false))
+        {
+            return receiving;
+        }
+
         try
         {
             await begun.WaitAsync(token);
+
+            // ! nor any link begun on a session its let-go ended
+            if (again is not null && !Stands((link, again, receiving), false))
+            {
+                return receiving;
+            }
 
             var attached = AmqpEndpoints.AttachedOf();
             var receiver = new ReceiverLink(
@@ -1481,34 +1518,13 @@ public sealed class AmqpBrokerAdapter : IBrokerAdapter, IAsyncDisposable
                 throw new IOException($"its broker refused the subscription of {Id} to {queue}: {AmqpEndpoints.ReasonOf(await AmqpEndpoints.EndOf(receiver).WaitAsync(token))}");
             }
 
-            // ! a name attached again is held before its credit goes: from then on, an unsubscription
-            // finds it and lets it go by its DETACH, which its connection's reader reads only after
+            // ! a name attached again is held by the names before its credit goes: from then on, an
+            // unsubscription lets it go by its DETACH, which its connection's reader reads only after
             // each message it read before, so that no OPEN reaches its participant once its let-go
-            // settled (spec 15.21). One let go as it attached is given no credit, and its session ends
-            if (isAgain)
+            // settled (spec 15.21). One let go before is given no credit, its session ended
+            if (again is not null && !Stands((link, again, receiving), true))
             {
-                bool isHeld;
-
-                lock (_gate)
-                {
-                    isHeld = !link.IsEnded && !link.LetGo.Contains(name);
-
-                    if (isHeld)
-                    {
-                        link.Names[name] = receiving;
-                    }
-                    else
-                    {
-                        receiving.IsLetGo = true;
-                    }
-                }
-
-                if (!isHeld)
-                {
-                    AmqpEndpoints.CloseAtOnce(session);
-
-                    return receiving;
-                }
+                return receiving;
             }
 
             // * its credit its own: none restored by the library, one more as each message is settled;
@@ -1548,12 +1564,42 @@ public sealed class AmqpBrokerAdapter : IBrokerAdapter, IAsyncDisposable
         }
     }
 
+    // whether a name attached again still stands, its receiving its own; at its credit, held by its
+    // link in its place. One let go meanwhile, or whose link ended, has its session ended, no credit
+    private bool Stands((Incarnation Link, Reattachment Again, Receiving Receiving) standing, bool isCredited)
+    {
+        var (link, again, receiving) = standing;
+
+        lock (_gate)
+        {
+            if (!link.IsEnded && !again.IsLetGo)
+            {
+                again.Receiving = receiving;
+
+                if (isCredited)
+                {
+                    link.Reattachments.Remove(receiving.Queue);
+                    link.Names[receiving.Queue] = receiving;
+                }
+
+                return true;
+            }
+
+            receiving.IsLetGo = true;
+        }
+
+        AmqpEndpoints.CloseAtOnce(receiving.Session);
+
+        return false;
+    }
+
     // a receiver's end it did not ask: its inbox's, its link lost; a held name's, attached again
     // once on a fresh session, and its link lost where that is refused or the name is lost again
     private void Lost((Incarnation Link, Receiving Receiving) lost, string reason)
     {
         var (link, receiving) = lost;
         bool isLinkLost;
+        Reattachment? again = null;
 
         lock (_gate)
         {
@@ -1583,6 +1629,14 @@ public sealed class AmqpBrokerAdapter : IBrokerAdapter, IAsyncDisposable
                 link.Names.Remove(key);
                 link.Losses[key] = link.Losses.GetValueOrDefault(key) + 1;
                 isLinkLost = link.Losses[key] > 1;
+
+                // ! held, and attached again, from here, under the same gate: an unsubscription or a
+                // subscription that comes as it attaches again finds it
+                if (!isLinkLost)
+                {
+                    again = new Reattachment();
+                    link.Reattachments[key] = again;
+                }
             }
         }
 
@@ -1595,11 +1649,11 @@ public sealed class AmqpBrokerAdapter : IBrokerAdapter, IAsyncDisposable
             return;
         }
 
-        _ = Reattach((link, receiving.Topic, receiving.Queue));
+        _ = Reattach((link, receiving.Topic, receiving.Queue), again!);
     }
 
     // a held name's receiver attached again, once, in place, on a fresh session, its core told nothing
-    private async Task Reattach((Incarnation Link, IReadOnlyList<string> Topic, string Queue) lost)
+    private async Task Reattach((Incarnation Link, IReadOnlyList<string> Topic, string Queue) lost, Reattachment again)
     {
         var (link, topic, key) = lost;
 
@@ -1608,17 +1662,24 @@ public sealed class AmqpBrokerAdapter : IBrokerAdapter, IAsyncDisposable
             using var timeout = new CancellationTokenSource(_options.ConnectTimeout, _platform);
             using var linked = CancellationTokenSource.CreateLinkedTokenSource(timeout.Token, link.Life.Token);
 
-            // ! held before its credit goes, as ReceiverOf says: held after it, an unsubscription in
-            // between would find no receiver and settle at once, a message already through the gate
-            await ReceiverOf((link, topic, key, IsAgain: true), linked.Token);
+            // ! held by its reattachment from its loss on, and by the names at its credit, as
+            // ReceiverOf says: an unsubscription meanwhile always finds it, never settling while a
+            // message already through the gate is on its way to its participant
+            await ReceiverOf((link, topic, key, again), linked.Token);
         }
         catch (Exception reason) when (reason is not OutOfMemoryException)
         {
             bool isLetGo;
 
+            // ! its own let-go, never its name's: a subscription after an unsubscription clears that
             lock (_gate)
             {
-                isLetGo = link.LetGo.Contains(key);
+                isLetGo = again.IsLetGo;
+
+                if (link.Reattachments.TryGetValue(key, out var held) && held == again)
+                {
+                    link.Reattachments.Remove(key);
+                }
             }
 
             if (!isLetGo)
@@ -1865,6 +1926,15 @@ public sealed class AmqpBrokerAdapter : IBrokerAdapter, IAsyncDisposable
         }
     }
 
+    // a held name attached again: the receiving it draws once its session begins, and whether an
+    // unsubscription let it go before its credit went
+    private sealed class Reattachment
+    {
+        public Receiving? Receiving { get; set; }
+
+        public bool IsLetGo { get; set; }
+    }
+
     // a receiving session and its receiver: the topic it reads, its receive bound, and what it handed on unsettled
     private sealed class Receiving((IReadOnlyList<string> Topic, string Queue) read, Session session)
     {
@@ -1933,6 +2003,9 @@ public sealed class AmqpBrokerAdapter : IBrokerAdapter, IAsyncDisposable
 
         // each name's subscription under way, until its ATTACH is answered
         public Dictionary<string, Task<Receiving>> Pending { get; } = new(StringComparer.Ordinal);
+
+        // each held name its broker ended, attached again, until its receiver is given credit
+        public Dictionary<string, Reattachment> Reattachments { get; } = new(StringComparer.Ordinal);
 
         public HashSet<string> LetGo { get; } = new(StringComparer.Ordinal);
 

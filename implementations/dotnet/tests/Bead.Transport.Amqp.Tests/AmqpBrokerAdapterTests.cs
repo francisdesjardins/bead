@@ -1450,15 +1450,19 @@ public sealed class AmqpBrokerAdapterTests : IAsyncLifetime
         Assert.Equal((true, 2), (adapter.IsLinked, downs.Count));
         Assert.True(((global::Amqp.Framing.Detach)detaching.Performative!).Closed);
 
-        // * let go while its receiver is attached again: let go at once, and that ATTACH never held
+        // * let go while its receiver is attached again: let go at once, its session ended before
+        // that ATTACH is answered, and given no credit when that answer comes late (AMQP 1.0 §2.5.5)
         _script.Holding = (_) =>
         {
             return false;
         };
         await adapter.Subscribe(Name).WaitAsync(Patience, Cancelled);
+
+        ushort? ending = null;
+
         _script.Holding = (frame) =>
         {
-            return IsAttachOf(frame, NameQueue);
+            return IsAttachOf(frame, NameQueue) || (frame.Performative is AmqpEnd && frame.Channel == ending);
         };
         mark = letting.Mark;
         await letting.Detach(letting.LinkOf(NameQueue), new Error(new Symbol("amqp:resource-deleted")));
@@ -1470,23 +1474,159 @@ public sealed class AmqpBrokerAdapterTests : IAsyncLifetime
             },
             from: mark);
 
+        ending = reattaching.Channel;
         await adapter.Unsubscribe(Name).WaitAsync(Patience, Cancelled);
-        await letting.AnswerAttach(reattaching);
         await letting.Next(
             (frame) =>
             {
                 return frame.Performative is AmqpEnd && frame.Channel == reattaching.Channel;
             },
             from: mark);
+        await letting.AnswerAttach(reattaching);
         await Task.Delay(100, Cancelled);
-        Assert.Equal((true, 2), (adapter.IsLinked, downs.Count));
-
-        // * and given no credit, let go before it was held
         Assert.DoesNotContain(letting.Frames.Skip(mark), (frame) =>
         {
             return frame.Channel == reattaching.Channel && frame.Performative is Flow { HasHandle: true };
         });
+        await letting.End(reattaching.Channel);
+        await Task.Delay(100, Cancelled);
+        Assert.Equal((true, 2), (adapter.IsLinked, downs.Count));
         await adapter.Stop();
+
+        // * subscribed again as it attaches again: held at once, its one receiver credited once its
+        // ATTACH is answered
+        _script.Holding = (_) =>
+        {
+            return false;
+        };
+
+        var subscribing = await LinkUp((adapter, _script));
+
+        await adapter.Subscribe(Name).WaitAsync(Patience, Cancelled);
+        _script.Holding = (frame) =>
+        {
+            return IsAttachOf(frame, NameQueue);
+        };
+        mark = subscribing.Mark;
+        await subscribing.Detach(subscribing.LinkOf(NameQueue), new Error(new Symbol("amqp:resource-deleted")));
+
+        var attaching = await subscribing.Next(
+            (frame) =>
+            {
+                return IsAttachOf(frame, NameQueue);
+            },
+            from: mark);
+
+        await adapter.Subscribe(Name).WaitAsync(Patience, Cancelled);
+        await subscribing.AnswerAttach(attaching);
+        await subscribing.Next(
+            (frame) =>
+            {
+                return frame.Channel == attaching.Channel && frame.Performative is Flow { HasHandle: true };
+            },
+            from: mark);
+        await Task.Delay(100, Cancelled);
+        Assert.Single(subscribing.Frames.Skip(mark), (frame) =>
+        {
+            return IsAttachOf(frame, NameQueue);
+        });
+        Assert.Equal((true, 2), (adapter.IsLinked, downs.Count));
+        await adapter.Stop();
+    }
+
+    [Fact]
+    public async Task Holds_one_receiver_of_a_name_subscribed_again_after_an_unsubscription_met_it_as_it_attached_again_the_one_let_go_given_no_credit_whether_or_not_its_ATTACH_is_answered_spec_15_34()
+    {
+        await using var adapter = AdapterOf();
+        var (_, downs) = HeardOf(adapter);
+
+        foreach (var isAnswered in new[] { true, false })
+        {
+            var connection = await LinkUp((adapter, _script));
+            ushort? ending = null;
+
+            _script.Holding = (_) =>
+            {
+                return false;
+            };
+            await adapter.Subscribe(Name).WaitAsync(Patience, Cancelled);
+            _script.Holding = (frame) =>
+            {
+                return IsAttachOf(frame, NameQueue) || (frame.Performative is AmqpEnd && frame.Channel == ending);
+            };
+
+            // its broker ends the name's receiver: attached again, its ATTACH held
+            var mark = connection.Mark;
+
+            await connection.Detach(connection.LinkOf(NameQueue), new Error(new Symbol("amqp:resource-deleted")));
+
+            var reattaching = await connection.Next(
+                (frame) =>
+                {
+                    return IsAttachOf(frame, NameQueue);
+                },
+                from: mark);
+
+            ending = reattaching.Channel;
+
+            // * let go, then subscribed anew, as it attaches again
+            await adapter.Unsubscribe(Name).WaitAsync(Patience, Cancelled);
+
+            var subscribing = adapter.Subscribe(Name);
+            var fresh = await connection.Next(
+                (frame) =>
+                {
+                    return IsAttachOf(frame, NameQueue) && frame.Channel != reattaching.Channel;
+                },
+                from: mark);
+
+            await connection.AnswerAttach(fresh);
+            await subscribing.WaitAsync(Patience, Cancelled);
+
+            // * its ATTACH answered late, or never: the receiver let go is given no credit, and its
+            // session ends; the one subscribed anew alone holds the name
+            if (isAnswered)
+            {
+                await connection.AnswerAttach(reattaching);
+            }
+
+            await Task.Delay(100, Cancelled);
+            Assert.DoesNotContain(connection.Frames.Skip(mark), (frame) =>
+            {
+                return frame.Channel == reattaching.Channel && frame.Performative is Flow { HasHandle: true };
+            });
+            Assert.Contains(connection.Frames.Skip(mark), (frame) =>
+            {
+                return frame.Channel == fresh.Channel && frame.Performative is Flow { HasHandle: true };
+            });
+            await connection.Next(
+                (frame) =>
+                {
+                    return frame.Performative is AmqpEnd && frame.Channel == reattaching.Channel;
+                },
+                from: mark);
+            await connection.End(reattaching.Channel);
+
+            // * its next let-go detaches that one, and leaves no receiver of the name behind
+            _script.Holding = (_) =>
+            {
+                return false;
+            };
+
+            var leaving = connection.Mark;
+
+            await adapter.Unsubscribe(Name).WaitAsync(Patience, Cancelled);
+            Assert.Contains(connection.Frames.Skip(leaving), (frame) =>
+            {
+                return frame.Channel == fresh.Channel && frame.Performative is global::Amqp.Framing.Detach;
+            });
+            Assert.DoesNotContain(connection.Frames.Skip(leaving), (frame) =>
+            {
+                return frame.Channel == reattaching.Channel;
+            });
+            Assert.Equal((true, 0), (adapter.IsLinked, downs.Count));
+            await adapter.Stop();
+        }
     }
 
     [Theory]
