@@ -23,7 +23,8 @@
 // what it owes by hand: the CHANGELOG's line on a document's new tag, each of decision 0006's gates
 // owed that names the release, the documents brought to it, the run of the benches in CI on the
 // release's branch, each side's comparison with the last release read; and the last fuzzing
-// campaign's run, read.
+// campaign's run, read; then, after the push, the libraries attached by the tag's packages run,
+// with their sums and attestations checked.
 // A <move> is x.y.z, patch, minor, major or same, from the document's last release. Run again, it
 // re-dates, regenerates and checks. `tag`, after the finish, <version> defaulting to the newest v*:
 // tags spec-v…, debugging-v… and transcoding-v… at the commit v<version> tags, for each document whose version no
@@ -403,6 +404,12 @@ export const SITE_BUILD = 'site/build.mjs';
 
 // the line that owes the last fuzzing campaign's run its reading
 export const FUZZ_OWED = `owed by hand: the last run of ${FUZZ}, its findings read, each a case of its side's tests, as \`gh run list --workflow fuzz.yml --limit 1\` lists it`;
+
+// the release's libraries, attached by their tag's run, with sums and provenance
+export const PACKAGES = '.github/workflows/packages.yml';
+export const packagesOwed = (version) => {
+  return `owed after the push: the run of ${PACKAGES} on v${version}, its TypeScript tarball, every packable C# project's nupkg, SHA256SUMS and each attestation checked; gh run list --workflow packages.yml --branch v${version} --limit 1; if no run starts, gh workflow run packages.yml --ref v${version} -f tag=v${version}`;
+};
 
 // a line that runs `beadc breaking`, read whole
 const BREAKING = /\b(?:cli\.ts|beadc(?:\.sh|\.ps1)?) breaking\b/;
@@ -822,6 +829,9 @@ export const prepare = (root, options = {}) => {
   if (existsSync(join(root, FUZZ))) {
     log(FUZZ_OWED);
   }
+  if (existsSync(join(root, PACKAGES))) {
+    log(packagesOwed(product));
+  }
   if (first) {
     log(`next: git add -A && git commit -m "chore(release): ${product}"`);
     log(`      git flow ${kind} publish ${product}, and wait for ci-ok`);
@@ -956,6 +966,9 @@ export const tag = (root, options = {}) => {
     log(`next: git commit -m "ci: take out the waivers ${name} makes moot" -- ${CI}`);
   }
   log(`push: ${push}`);
+  if (show(PACKAGES) !== null) {
+    log(packagesOwed(version));
+  }
   return { version, made, push };
 };
 

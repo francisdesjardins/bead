@@ -1050,6 +1050,20 @@ console.log(localDay(new Date('2026-10-08T01:30:00Z')));`;
     assert.deepEqual(logged, ['release 0.2.0: spec 0.2.0, debugging 0.1.0']);
     assert.equal(git(root, 'status', '--porcelain'), '');
   });
+
+  test('prepare owes the tag’s packages run and its proofs where the tree keeps the workflow', () => {
+    const kept = releasing();
+    write(kept, { '.github/workflows/packages.yml': 'name: Packages\n' });
+    const owing = (root) => {
+      return prepared(root, { moves: { spec: 'minor' } }).logged.filter((line) => {
+        return line.includes('packages.yml');
+      });
+    };
+    assert.deepEqual(owing(kept), [
+      "owed after the push: the run of .github/workflows/packages.yml on v0.2.0, its TypeScript tarball, every packable C# project's nupkg, SHA256SUMS and each attestation checked; gh run list --workflow packages.yml --branch v0.2.0 --limit 1; if no run starts, gh workflow run packages.yml --ref v0.2.0 -f tag=v0.2.0",
+    ]);
+    assert.deepEqual(owing(releasing()), []);
+  });
 });
 
 // ── Tag ───────────────────────────────────────────────────────────────────────
@@ -1063,6 +1077,33 @@ describe('tag', () => {
     finish(root);
     return root;
   };
+
+  test('tag owes the packages and their proofs from the tagged workflow, apart from the checked-out branch', () => {
+    const root = releasing();
+    write(root, { '.github/workflows/packages.yml': 'name: Packages\n' });
+    prepared(root, { moves: { spec: 'minor' } });
+    git(root, 'add', '-A');
+    git(root, 'commit', '-qm', 'chore(release): 0.2.0');
+    finish(root);
+    rmSync(join(root, '.github/workflows/packages.yml'));
+    const logged = [];
+    tag(root, {
+      log: (line) => {
+        logged.push(line);
+      },
+    });
+    assert.match(logged.at(-1), /packages\.yml on v0\.2\.0/);
+    assert.match(logged.at(-1), /--ref v0\.2\.0 -f tag=v0\.2\.0/);
+    assert.deepEqual(
+      tag(finished(), {
+        log: (line) => {
+          logged.push(line);
+        },
+      }).made,
+      ['spec-v0.2.0']
+    );
+    assert.match(logged.at(-1), /^push:/);
+  });
 
   test('its push deletes the release branch origin still holds, kept through the finish', () => {
     const root = finished();
