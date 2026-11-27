@@ -23,7 +23,7 @@ public sealed partial class RouterClientTests
         Assert.Empty(scripted.Transport.Envelopes);
     }
 
-    [Fact(Skip = "Defect: RouterClient accepts an empty default JWT at construction; TypeScript and Rust refuse it.")]
+    [Fact]
     public void Refuses_an_empty_JWT_default_credential_as_a_client_router_is_built()
     {
         var transport = new ScriptedTransport();

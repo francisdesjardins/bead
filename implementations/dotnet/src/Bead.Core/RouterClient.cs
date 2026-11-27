@@ -329,8 +329,8 @@ public sealed class RouterClient : IRouterLike, IRouterTarget, IDisposable
     /// <see cref="Bead.Credential.Jwt"/>, or an <see cref="Bead.Credential.Elsewhere(string)"/> with
     /// what its transport carries; none presents none. Given anew, it renews it, and ends a
     /// withdrawal, as none given does: going on without one is written. OPAQUE, which a call asks for
-    /// alone, is an <see cref="ArgumentException"/>, and so is a JWT under limits that hold a chunk's
-    /// envelope or an envelope under 1,024 bytes (spec 12.2).
+    /// alone, is an <see cref="ArgumentException"/>, and so is a JWT with no token, and one under
+    /// limits that hold a chunk's envelope or an envelope under 1,024 bytes (spec 12.2).
     /// </summary>
     public Credential? Credential
     {
@@ -353,6 +353,7 @@ public sealed class RouterClient : IRouterLike, IRouterTarget, IDisposable
                         nameof(value));
                 }
 
+                CallSession.AssertPresentable(given);
                 CredentialResolver.AssertLimits(_core.Limits, given.Scheme == CredentialScheme.Jwt);
             }
 
