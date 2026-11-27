@@ -1460,6 +1460,12 @@ jobs:
       # helper, "1 byte" at 1, or is a constant above 1 the tool names.
       - name: Check the byte counts
         run: node tools/check-byte-counts.mjs
+      # Each number a wire format's standard defines is a constant named after the standard, one
+      # name on every side: each name of tools/wire-names.tsv is defined once in the module its row
+      # gives, with the row's value, or the row says why the side reads no such number (decision
+      # 0057).
+      - name: Check the wire's names
+        run: node tools/check-wire-names.mjs
       # The page beadproto.dev serves is what its build writes from site/, byte for byte, each
       # diagram's SVG its source's render and each icon its mark's, by the hashes they record: no
       # browser, nothing installed.
