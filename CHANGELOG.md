@@ -17,6 +17,8 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- The Rust test kit's compiler-backed surface checks find the core's libraries from Cargo's JSON
+  messages, so they hold under the build-directory layout Cargo 1.100 makes its default.
 - beadc's image is distroless, on `gcr.io/distroless/nodejs26-debian13`: the same Node 26.13.1, with
   no shell, no package manager, no npm and no Corepack.
 - The page's bar, where its contents are a sheet, holds the mark alone at its left, then the
