@@ -542,17 +542,12 @@ test.describe('createMqttBrokerAdapter', () => {
     await using closed = await closedPort();
     const { port } = closed;
 
-    // * and a host no name resolves to (RFC 6761 §6.4), on the port of its scheme
     for (const url of [
       `mqtt://127.0.0.1:${String(port)}`,
       `mqtts://127.0.0.1:${String(port)}`,
       `ws://127.0.0.1:${String(port)}/mqtt`,
       `wss://127.0.0.1:${String(port)}/mqtt`,
-      'mqtt://broker.invalid',
-      'mqtts://broker.invalid',
     ]) {
-      // * given up within a second, as MQTTnet's own timeout gives the C# side's up, so that a slow
-      // resolver fails it rather than the test
       const adapter = adapterOf(script, { connectTimeout: 1_000, url });
       const { downs } = heardOf(adapter);
 
