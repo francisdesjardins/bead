@@ -9,6 +9,13 @@ reaches, and proven against the TypeScript and Rust sides in the interop. The ru
 warning an error, one serial scheduler a router, and how the surface maps in .NET's terms — are
 [decision 0007](../../docs/decisions/0007-csharp-interfaces-blocks-two-parameters-no-warning.md)'s.
 
+## Install
+
+Download the release's eight `.nupkg` files into one folder and add it as a local NuGet feed.
+Choose the `Bead.*` packages the application calls, pinned to the release's version. The root's
+[Install](../../README.md#install) gives the commands and the sums and attestation checks. The
+packages target .NET 10.
+
 ## Build and test
 
 The .NET 10 SDK, as `global.json` pins it, that one and no later, a new one coming by Dependabot's

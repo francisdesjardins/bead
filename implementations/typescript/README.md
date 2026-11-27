@@ -11,6 +11,15 @@ over HTTP and JSON, beside the caller of the HTTP client beadc generates.
 Nothing in it imports a framework at run time. The specification and the conformance files every
 side plays are in [`spec/`](../../spec/).
 
+## Install
+
+Install this release's tarball, `francisdesjardins-bead-X.Y.Z.tgz`, by path or its GitHub Release
+URL. It contains JavaScript and declarations for the `@francisdesjardins/bead` subpaths. See the
+root's [Install](../../README.md#install) for the commands, optional peers, sums and attestation
+checks. Node 24.9 or later is required.
+
+## Use
+
 ```ts
 import { createWebSocketTransportClient } from '@francisdesjardins/bead/websocket-transport-client';
 import { createWebSocketTransportServer } from '@francisdesjardins/bead/websocket-transport-server';
