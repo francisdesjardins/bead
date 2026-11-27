@@ -201,7 +201,10 @@ no top-level field of its result; a `custom` rule, and an `additional_bindings` 
 on a `command`; a variable, a `body` other than `*`, a `get` or a `delete` on a request that is not
 `proto`, and a `response_body` on a result that is not; two routes of one method that tie under
 section 3.5, one template up to its variables' names; and a rule at `/openapi.json`, at the path of
-its HTTP transport, or at a default route's template.
+its HTTP transport, or at a default route's template. It judges each route's own rules over every
+route before it judges a tie, so a table refused for a tie holds no route that breaks a rule of its
+own; of the ties, it names the first route given that ties one before it, and the first route that
+one ties.
 
 3.10. A gateway MUST answer 404, `path-unknown`, a request whose path no route matches, and 405,
 `method-refused`, one whose path only routes of other methods match, its `allow` naming the methods

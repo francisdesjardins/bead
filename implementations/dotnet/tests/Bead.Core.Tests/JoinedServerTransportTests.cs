@@ -255,26 +255,80 @@ public sealed class JoinedServerTransportTests
         await using var joined = new JoinedServerTransport([first]);
 
         Assert.Null(joined.Type);
-        Assert.Throws<ArgumentException>(() =>
-        {
-            return new JoinedServerTransport([joined, paired]);
-        });
-        Assert.Throws<ArgumentException>(() =>
-        {
-            return new JoinedServerTransport([]);
-        });
+        Assert.StartsWith(
+            "a join takes transports that name the type of their handles, never a join",
+            Assert.Throws<ArgumentException>(() =>
+            {
+                return new JoinedServerTransport([joined, paired]);
+            }).Message,
+            StringComparison.Ordinal);
+        Assert.StartsWith(
+            "a join takes one transport at least",
+            Assert.Throws<ArgumentException>(() =>
+            {
+                return new JoinedServerTransport([]);
+            }).Message,
+            StringComparison.Ordinal);
         var clock = new SteppingClock(DateTimeOffset.UnixEpoch);
         await using var elsewhere = new MemoryTransportServer(new MemoryTransportServerOptions { Clock = clock });
 
-        Assert.Throws<ArgumentException>(() =>
-        {
-            return new JoinedServerTransport([paired, elsewhere]);
-        });
+        Assert.StartsWith(
+            "a join's transports run on one clock",
+            Assert.Throws<ArgumentException>(() =>
+            {
+                return new JoinedServerTransport([paired, elsewhere]);
+            }).Message,
+            StringComparison.Ordinal);
 
         // * one clock is the join's
         await using var together = new JoinedServerTransport([elsewhere, new PairedTransport(new SerialScheduler()) { Clock = clock }]);
 
         Assert.Same(clock, together.Clock);
+    }
+
+    // spec 15.14
+    [Fact]
+    public async Task Refuses_a_join_for_the_first_of_its_rules_any_transport_breaks_in_the_order_the_rules_are_stated()
+    {
+        var one = new SteppingClock(DateTimeOffset.UnixEpoch);
+        var other = new SteppingClock(DateTimeOffset.UnixEpoch);
+
+        // a transport of a type and a clock, A the in-memory type and B the WebSocket one
+        PairedTransport Of(string kind, TimeProvider clock)
+        {
+            return new PairedTransport(new SerialScheduler()) { Kind = kind, Clock = clock };
+        }
+
+        string RefusalOf(IReadOnlyList<IServerTransport> transports)
+        {
+            return Assert.Throws<ArgumentException>(() =>
+            {
+                return new JoinedServerTransport(transports);
+            }).Message;
+        }
+
+        var memory = TransportTypes.Memory;
+        var webSocket = TransportTypes.WebSocket;
+        await using var join = new JoinedServerTransport([Of(memory, one)]);
+        var twoMemory = "a join takes one transport of each type: two are MEMORY, whose handles might be one";
+        var never = "a join takes transports that name the type of their handles, never a join";
+
+        // * the type given again is refused before the clock that differs, wherever each comes
+        Assert.StartsWith(twoMemory, RefusalOf([Of(memory, one), Of(webSocket, other), Of(memory, one)]), StringComparison.Ordinal);
+
+        // a join among them before a type given again, and before a clock that differs
+        Assert.StartsWith(never, RefusalOf([Of(memory, one), Of(memory, one), join]), StringComparison.Ordinal);
+        Assert.StartsWith(never, RefusalOf([Of(memory, one), Of(webSocket, other), join]), StringComparison.Ordinal);
+
+        // a type given again on a clock of its own: the type
+        Assert.StartsWith(twoMemory, RefusalOf([Of(memory, one), Of(memory, other)]), StringComparison.Ordinal);
+
+        // the first type given again is the one named
+        Assert.StartsWith(
+            "a join takes one transport of each type: two are WS, whose handles might be one",
+            RefusalOf([Of(memory, one), Of(webSocket, one), Of(webSocket, one), Of(memory, one)]),
+            StringComparison.Ordinal);
+        Assert.StartsWith("a join takes one transport at least", RefusalOf([]), StringComparison.Ordinal);
     }
 
     // spec 15.14

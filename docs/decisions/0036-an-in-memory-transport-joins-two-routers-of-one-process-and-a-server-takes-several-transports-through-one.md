@@ -129,6 +129,37 @@ the C# side, one `IServerTransport` over several; `JoinedServerTransport` on the
   address; the join serves no port, and one port for two transports comes from a proxy in front of
   them, as the README has it.
 
+**A list's refusals are judged rule by rule** (spec 15.14; transcoding 3.9). A join is refused for
+the first of its rules that any transport breaks, in the order the rules are stated, each judged
+over every transport before the next:
+
+1. **none**: a join takes one transport at least, `a join takes one transport at least`;
+2. **each is a transport**: an element that is none, or no object, which only a caller past
+   TypeScript's types can give, `a join takes transports, not <what it was given>`; the C# side
+   keeps its `ArgumentNullException` for a null element, as its nullable surface has it, and Rust's
+   types give none;
+3. **each names a type, never a join**:
+   `a join takes transports that name the type of their handles, never a join`;
+4. **one of each type**, the first type given again named:
+   `a join takes one transport of each type: two are <type>, whose handles might be one`
+   ([0025](0025-a-transport-draws-each-connections-handle-and-gives-none-twice.md));
+5. **one clock**: every transport runs on the first's, by each side's identity of a clock, `is_same`
+   on the Rust side and the reference on the others, `a join's transports run on one clock`
+   ([0011](0011-every-side-takes-its-time-from-a-clock-it-is-given.md)); a transport that names no
+   clock, which only a caller past TypeScript's types can give, is refused there in the words of
+   0011's router refusal, `which names none`, said of the join.
+
+Each transport's type is read once, in the order given, then each one's clock once, in the same
+order; what a transport's own member throws is no refusal of the join's, and goes on as thrown. A
+refusal for a later rule means every earlier rule holds over the whole list. The spec states its
+refusals over several reasons in this form: 5.1 refuses an envelope "with the first check that
+fails", and 16.10 a declaration for "the first of these reasons that applies". A typed caller meets
+the same order, since its compiler refuses the shape rules first. A gateway's route table follows
+the same rule for a list held to rules on each item and between items
+([0037](0037-a-procedure-is-also-an-http-route-which-a-gateway-answers-as-one-more-client-of-its-server.md)):
+each route's own rules over every route, then the tie between two routes of one method, of which
+the first route given that ties one before it is named, with the first it ties.
+
 ## Consequences
 
 **A connection costs a router client and a handle wherever a caller draws one**: a gateway that
@@ -158,6 +189,7 @@ in-memory transport's:
 `hands on each transport’s events with the handle it drew`,
 `asks each connection’s flags of the transport that drew it, and sends and closes through it`,
 `refuses to join two transports of one type`,
+`refuses a join for the first of its rules any transport breaks, in the order the rules are stated`,
 `stops every transport it joined, and sums their gauges` and
 `serves one service offered once to a client of each transport`. Beside them, each side's
 conversation player plays, through a real pair of it, the conversations whose connections it can
@@ -192,7 +224,8 @@ the probes before it was answered: eight accepted, one in part, none refused. It
 in-memory connection is this record's; the others are
 [0037](0037-a-procedure-is-also-an-http-route-which-a-gateway-answers-as-one-more-client-of-its-server.md)'s.
 A round of its own, on the Web Worker client's error, holds the other in-process transport to the
-same close. The objections, with the answers that hold:
+same close, and another, on a list's refusals, holds the join and a gateway's route table to one
+order. The objections, with the answers that hold:
 
 ### On the in-memory connection
 
@@ -208,3 +241,26 @@ same close. The objections, with the answers that hold:
 | Its server hears that close clean, since the client posts `bead-close` whatever ended it, where spec 15.13 has the in-memory transport's server hear a client's close as clean as the client says                                                                                     | Accepted: a close the client sends after its worker's error posts `bead-lost`, beside `bead-close`, which its server tells unclean, as it does a `disconnect` that is not clean; a plain `disconnect` stays clean, so the two in-process transports agree                      |
 | A worker whose script fails to load fires its `error` before the connection opens, HTML's "run a worker", and the connect waits out its timeout                                                                                                                                       | Accepted: a worker that errs before the connection opens fails the connect with a `ConnectError` at once, its words the error's                                                                                                                                                |
 | A behaviour of the TypeScript side alone, with no twin, breaks the rule that both sides play one behaviour                                                                                                                                                                            | Refused: the C# side has no Web Worker client, as `docs/support.md` states; there is nothing to twin                                                                                                                                                                           |
+
+### On a list's refusals
+
+The proposal judged a join transport by transport. One dissent at xhigh met it with nine
+objections: eight accepted, one in part, none refused.
+
+| Objection                                                                                                                                                                                                                                | Answer                                                                                                                                                                                                                             |
+| ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| The proposed twin does not pin the rule it states. Two orders other than the proposal's pass all three cases, and the case of a join before a duplicate tells no order apart. A second divergence, `[A c1, B c2, J]`, was left out.      | **Accepted.** The twin's cases tell every order apart: a duplicate before a join, a join after a clock change, a type and its clock both differing, the first type repeated named, and the empty join.                             |
+| Per transport is the weaker rule. The refusals name no position. Rule by rule is monotone, every refusal order the spec states over several reasons is rule-ranked (5.1, 16.10), and a typed caller already meets the shape rules first. | **Accepted.** Every side judges rule by rule. TypeScript moves its untyped guards and keeps its order for the types. C# and Rust judge the clock after every type rule.                                                            |
+| 15.14 names one rule, not four. The order lives in code alone, which is how the sides diverged, and a fourth side reads only the spec.                                                                                                   | **Accepted.** 15.14 states the rules and their order in 16.10's form. The words stay each side's own, held by the twin.                                                                                                            |
+| The gateway's route table has the same divergence the other way: TypeScript and C# judge each route's rules before ties, Rust judges route by route.                                                                                     | **Accepted.** One rule for a list held to rules on each item and between items: each item's rules first, then the rules between items. Rust's gateway moves, transcoding 3.9 says so, and a twin holds it on three sides.          |
+| An untyped TypeScript caller's `undefined`, `null` or sparse element is refused as "one transport at least", or by a bare TypeError.                                                                                                     | **Accepted.** TypeScript refuses it in its own words, as its other untyped guards do. C# keeps `ArgumentNullException`. These are `native` rows.                                                                                   |
+| The "same words on every side" are held by code alone: C# and Rust assert the duplicate's words only.                                                                                                                                    | **Accepted.** Every refusal's words are asserted on every side.                                                                                                                                                                    |
+| A clock that is none passes the join in TypeScript and C# when both transports name none.                                                                                                                                                | **Accepted in part.** Every side's interface now requires the clock, so only an untyped TypeScript caller can give none. TypeScript refuses it there, in 0011's words. C# and Rust get `native` rows, since their types forbid it. |
+| A transport's members are read at different points on each side, so a getter that throws surfaces differently.                                                                                                                           | **Accepted.** Each transport's type is read once, then its clock once, in order, on every side. What a member throws propagates as thrown, and is not the join's refusal.                                                          |
+| The new title must be cited byte for byte where the twins are listed (`docs/support.md`, decision 0036), and the CHANGELOG must name what each side changes.                                                                             | **Accepted.** Both cite it, and the CHANGELOG names each side's change.                                                                                                                                                            |
+
+The alternatives refused:
+
+- **Per transport, as proposed.** Its refusal says nothing a reader can locate, it is not monotone,
+  and it differs from every order the spec states.
+- **A twin alone, no spec text.** A side that reads only the spec would diverge again.

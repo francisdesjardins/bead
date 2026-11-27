@@ -449,6 +449,118 @@ test.describe('joinTransports', () => {
   });
 
   // spec 15.14
+  test('refuses a join for the first of its rules any transport breaks, in the order the rules are stated', () => {
+    const first = createTestClock();
+    const second = createTestClock();
+    const a = createFake('A', { clock: first, flags: {} }).transport;
+    const b = createFake('B', { clock: second, flags: {} }).transport;
+    const join = joinTransports([createFake('C', { clock: first, flags: {} }).transport]);
+    const refusalOf = (transports: readonly IJoinableTransportServer[]): string => {
+      try {
+        joinTransports(transports);
+      } catch (error) {
+        expect(error).toBeInstanceOf(ProgrammerError);
+
+        return (error as Error).message;
+      }
+
+      throw new Error('the join was not refused');
+    };
+
+    // * each rule is judged over every transport before the next: a later rule's refusal means
+    // every earlier one holds
+    expect([
+      refusalOf([a, b, a]),
+      refusalOf([a, a, join as never]),
+      refusalOf([a, b, join as never]),
+      refusalOf([a, createFake('A', { clock: second, flags: {} }).transport]),
+      refusalOf([a, b, b, a]),
+      refusalOf([]),
+    ]).toEqual([
+      'a join takes one transport of each type: two are A, whose handles might be one',
+      'a join takes transports that name the type of their handles, never a join',
+      'a join takes transports that name the type of their handles, never a join',
+      'a join takes one transport of each type: two are A, whose handles might be one',
+      'a join takes one transport of each type: two are B, whose handles might be one',
+      'a join takes one transport at least',
+    ]);
+  });
+
+  // spec 15.14
+  test('refuses a join of what is no transport, in its own words, as only a caller past the types gives it', () => {
+    const memory = createMemoryTransportServer();
+    const join = joinTransports([createFake('C', { flags: {} }).transport]);
+    const given = (elements: readonly unknown[]): IJoinableTransportServer[] => {
+      return elements as IJoinableTransportServer[];
+    };
+
+    // ! a hole is the `undefined` it reads as, never a join of none
+    // oxlint-disable-next-line no-sparse-arrays -- the hole is what this case gives
+    const holed = given([, memory]);
+
+    expect(() => {
+      return joinTransports(holed);
+    }).toThrow(new ProgrammerError('a join takes transports, not undefined'));
+    expect(() => {
+      return joinTransports(given([undefined, memory]));
+    }).toThrow(new ProgrammerError('a join takes transports, not undefined'));
+    expect(() => {
+      return joinTransports(given([memory, null]));
+    }).toThrow(new ProgrammerError('a join takes transports, not null'));
+    expect(() => {
+      return joinTransports(given([memory, 'MEMORY']));
+    }).toThrow(new ProgrammerError('a join takes transports, not MEMORY'));
+
+    // before a join among them, and before two of one type
+    expect(() => {
+      return joinTransports(given([join, memory, memory, 5]));
+    }).toThrow(new ProgrammerError('a join takes transports, not 5'));
+
+    // a list that is no array is none given
+    expect(() => {
+      return joinTransports(undefined as never);
+    }).toThrow(new ProgrammerError('a join takes one transport at least'));
+  });
+
+  // spec 15.14
+  test('refuses a join of a transport that names no clock, as only a caller past the types gives it', () => {
+    const clock = createTestClock();
+    const unclocked = (type: string): IJoinableTransportServer => {
+      return { ...createFake(type, { flags: {} }).transport, clock: undefined as never };
+    };
+
+    // * none is no clock, so two that name none are not one clock
+    expect(() => {
+      return joinTransports([unclocked('A'), unclocked('B')]);
+    }).toThrow(
+      new ProgrammerError('a join runs on the clock of its transport A, which names none')
+    );
+    expect(() => {
+      return joinTransports([createFake('A', { clock, flags: {} }).transport, unclocked('B')]);
+    }).toThrow(
+      new ProgrammerError('a join runs on the clock of its transport B, which names none')
+    );
+
+    // the first transport that breaks the rule is named: another clock before none
+    expect(() => {
+      return joinTransports([
+        createFake('A', { clock, flags: {} }).transport,
+        createFake('B', { clock: createTestClock(), flags: {} }).transport,
+        unclocked('C'),
+      ]);
+    }).toThrow(new ProgrammerError("a join's transports run on one clock"));
+
+    // two of one type before a clock of none
+    expect(() => {
+      return joinTransports([unclocked('A'), unclocked('A')]);
+    }).toThrow(
+      new ProgrammerError(
+        'a join takes one transport of each type: two are A, whose handles might be one'
+      )
+    );
+  });
+
+  // spec 15.14
   test('joins two transports given no clock, on the platform’s', async () => {
     using worker = createWorker();
     await using joined = joinTransports([createMemoryTransportServer(), worker.server]);

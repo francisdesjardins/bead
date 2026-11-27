@@ -2218,7 +2218,14 @@ connection it holds and takes no connect; a client's connect then fails before a
 15.14. A server MAY take its connections from several transports through one that joins them. A
 joined transport hands on each transport's events with the handle that transport drew, and each
 connection's sending, closing, credential, security and the procedures it takes are its own
-transport's. It MUST refuse to join two transports whose handles might be one. Its stop stops each,
+transport's. It MUST refuse to join two transports whose handles might be one (decision 0025). A
+join is refused, as it is built, for the first of these reasons that applies, each judged over every
+transport before the next: none is given; one given is no transport; one names no type of its
+handles, as a join names none; two name one type, the refusal naming the first type given again;
+one runs on a clock other than the first's, or names none (decision 0011). A join reads each
+transport's type once, in the order given, and only then each one's clock, once, in the same order;
+what a transport throws as it is read is no refusal of the join's, and reaches its caller as thrown.
+A side's sentences are its own, as section 16.10 has them. A joined transport's stop stops each,
 and its bounds and its gauges reach each, as section 15.1 has a transport's. It serves no port of its
 own: one port for two transports comes from a proxy in front of them.
 

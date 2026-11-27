@@ -527,8 +527,8 @@ fn etag_of(bytes: &[u8]) -> String {
     tag
 }
 
-// the table: each template parsed, a template off http.proto's grammar and two of one method that
-// tie refused, naming their routes (3.5)
+// the table: each template parsed, a template off http.proto's grammar refused, then two of one
+// method that tie refused, naming their routes (3.5, 3.9)
 fn served_of(routes: &[HttpRoute]) -> Result<Vec<Served>, ProgrammerError> {
     let mut served: Vec<Served> = Vec::new();
 
@@ -543,20 +543,6 @@ fn served_of(routes: &[HttpRoute]) -> Result<Vec<Served>, ProgrammerError> {
                 ))
             })?;
 
-            if let Some(tied) = served
-                .iter()
-                .find(|other| other.method == given.method && is_tie(&other.template, &template))
-            {
-                return Err(ProgrammerError::new(format!(
-                    "{name}'s route {} {} ties {}'s route {} {}",
-                    given.method,
-                    given.template,
-                    tied.route.procedure().procedure().procedure_name,
-                    tied.method,
-                    tied.template().template
-                )));
-            }
-
             served.push(Served {
                 route: route.clone(),
                 at,
@@ -564,6 +550,27 @@ fn served_of(routes: &[HttpRoute]) -> Result<Vec<Served>, ProgrammerError> {
                 template,
                 is_navigable: given.method == HttpMethod::Get && route.no_side_effects(),
             });
+        }
+    }
+
+    // * the tie between two routes is judged once every route's own rules hold, the first that
+    // ties one before it named (3.9): a table is a list, which two tables built apart may join
+    // with a tie no builder saw
+    for (index, one) in served.iter().enumerate() {
+        if let Some(tied) = served
+            .iter()
+            .take(index)
+            .find(|other| other.method == one.method && is_tie(&other.template, &one.template))
+        {
+            return Err(ProgrammerError::new(format!(
+                "{}'s route {} {} ties {}'s route {} {}",
+                one.route.procedure().procedure().procedure_name,
+                one.method,
+                one.template().template,
+                tied.route.procedure().procedure().procedure_name,
+                tied.method,
+                tied.template().template
+            )));
         }
     }
 

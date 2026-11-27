@@ -3298,6 +3298,39 @@ test('refuses a route table of two routes of one method that tie, naming both', 
   await gateway.stop();
 });
 
+// transcoding 3.9
+test('refuses a gateway’s routes for each route’s own rules before a tie between two', async () => {
+  await using fixture = await startTranscoding();
+  const initOf = (procedure: IHttpRouteInit['procedure']): IHttpRouteInit => {
+    const init = HTTP_ROUTES.find((each) => {
+      return each.procedure === procedure;
+    });
+
+    if (init === undefined) {
+      throw new Error('no such procedure in the route table');
+    }
+
+    return init;
+  };
+  const echo = initOf(TranscodingProcedures.echo);
+  const p: IHttpRouteInit = { ...echo, routes: [{ method: 'GET', template: '/a' }] };
+  const q: IHttpRouteInit = { ...echo, routes: [{ method: 'GET', template: '/a' }] };
+  const r: IHttpRouteInit = {
+    ...initOf(TranscodingProcedures.getBook),
+    routes: [{ method: 'GET', template: '/a/**/b' }],
+  };
+
+  // * r's template breaks its own rule, after the tie of p and q: its rule is judged first
+  expect(() => {
+    return createHTTPGateway({ routes: [p, q, r], transport: fixture.memory });
+  }).toThrow(new ProgrammerError("getBook's route GET /a/**/b: a ** that is not its last segment"));
+
+  // without it, the tie is the refusal
+  expect(() => {
+    return createHTTPGateway({ routes: [p, q], transport: fixture.memory });
+  }).toThrow(new ProgrammerError("echo's route GET /a ties echo's route GET /a"));
+});
+
 test('answers as the endpoint an application maps, and a caller of no address as local', async () => {
   await using fixture = await startTranscoding();
   const drawn: string[] = [];

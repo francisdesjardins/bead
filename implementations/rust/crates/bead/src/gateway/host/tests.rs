@@ -780,6 +780,51 @@ async fn refuses_a_window_of_0_a_member_given_in_its_policy_and_beside_it_and_tw
     );
 }
 
+// transcoding 3.9
+#[tokio::test]
+async fn refuses_a_gateway_s_routes_for_each_route_s_own_rules_before_a_tie_between_two() {
+    let memory = MemoryTransportServer::new(&MemoryTransportServerOptions::default())
+        .expect("the in-memory transport");
+    let service = Service::new();
+    let refusal = |routes: Vec<HttpRoute>| {
+        HttpGateway::new(&HttpGatewayOptions::new(memory.clone(), routes))
+            .err()
+            .map(|error| error.message().to_owned())
+    };
+    let get = |procedure: ServiceProcedure, template: &str| {
+        route_of(HttpRouteInit {
+            procedure,
+            request: HttpPayload::Text,
+            result: HttpPayload::Text,
+            notification: None,
+            failures: vec![],
+            no_side_effects: false,
+            routes: vec![HttpRouteTemplate {
+                method: HttpMethod::Get,
+                template: template.to_owned(),
+                body: None,
+                response_body: None,
+            }],
+        })
+        .expect("a route")
+    };
+    let p = get(ServiceProcedure::from(&service.echo), "/a");
+    let q = get(ServiceProcedure::from(&service.echo), "/a");
+    let r = get(ServiceProcedure::from(&service.raw), "/a/**/b");
+
+    // * r's template breaks its own rule, after the tie of p and q: its rule is judged first
+    assert_eq!(
+        refusal(vec![p.clone(), q.clone(), r]),
+        Some("raw's route GET /a/**/b: a ** that is not its last segment".to_owned())
+    );
+
+    // without it, the tie is the refusal
+    assert_eq!(
+        refusal(vec![p, q]),
+        Some("echo's route GET /a ties echo's route GET /a".to_owned())
+    );
+}
+
 #[tokio::test]
 async fn listens_once_until_it_stops_and_never_once_disposed() {
     let fixture = Fixture::new(|_| {}, true).await;

@@ -73,20 +73,77 @@ const sumGauges = (
   });
 };
 
-/** The one clock the transports run on, the first's; two are a misuse. */
-const clockOf = (
-  first: IJoinableTransportServer,
+/**
+ * The type of each transport a join is given, in the order given, and the clock they run on, the
+ * first's (spec 15.14). A join is refused, as a {@link ProgrammerError}, for the first of its rules
+ * that any transport breaks, each judged over every transport before the next: none given; one that
+ * is no transport; one that names no type, as a join; two of one type, the first type given again
+ * named; a clock other than the first's, or none. Each transport's type is read once, in order, then
+ * each one's clock, once: what a transport throws as it is read reaches the caller as thrown.
+ */
+const judgeJoin = (
   transports: readonly IJoinableTransportServer[]
-): IClock => {
-  if (
-    transports.some(({ clock }) => {
-      return clock !== first.clock;
-    })
-  ) {
-    throw new ProgrammerError("a join's transports run on one clock");
+): { clock: IClock; types: readonly string[] } => {
+  // a caller without types may give anything
+  const given: unknown = transports;
+
+  if (!Array.isArray(given) || given.length === 0) {
+    throw new ProgrammerError('a join takes one transport at least');
   }
 
-  return first.clock;
+  // ! an array's iterator reads a hole as the `undefined` it holds, so `[, memory]` is refused here
+  for (const element of given as readonly unknown[]) {
+    if (typeof element !== 'object' || element === null) {
+      throw new ProgrammerError(`a join takes transports, not ${String(element)}`);
+    }
+  }
+
+  const types: readonly unknown[] = transports.map(({ type }) => {
+    return type;
+  });
+
+  // a join names no type of its own, past the types, so its handles would be no one's
+  if (
+    types.some((type) => {
+      return typeof type !== 'string';
+    })
+  ) {
+    throw new ProgrammerError(
+      'a join takes transports that name the type of their handles, never a join'
+    );
+  }
+
+  const seen = new Set<string>();
+
+  for (const type of types as readonly string[]) {
+    if (seen.has(type)) {
+      throw new ProgrammerError(
+        `a join takes one transport of each type: two are ${type}, whose handles might be one`
+      );
+    }
+
+    seen.add(type);
+  }
+
+  const clocks: readonly unknown[] = transports.map(({ clock }) => {
+    return clock;
+  });
+  const [first] = clocks;
+
+  for (const [index, clock] of clocks.entries()) {
+    // ! only a caller past the types gives none, refused as a router refuses its transport's (0011)
+    if (clock === undefined || clock === null) {
+      throw new ProgrammerError(
+        `a join runs on the clock of its transport ${String(types[index])}, which names none`
+      );
+    }
+
+    if (clock !== first) {
+      throw new ProgrammerError("a join's transports run on one clock");
+    }
+  }
+
+  return { clock: first as IClock, types: types as readonly string[] };
 };
 
 // definition
@@ -97,7 +154,8 @@ const clockOf = (
  * in-memory transport beside a WebSocket one, a WebSocket transport beside an HTTP one. Each handle
  * stays the one its transport drew, and names that transport by its type, so two transports of one
  * type, whose handles might be one, are a {@link ProgrammerError} as the join is built: one
- * transport binds both addresses instead. So is none, a join among them, and two clocks.
+ * transport binds both addresses instead. So is none, a join among them, and two clocks, the first
+ * of these rules any transport breaks refused, each judged over every transport before the next.
  *
  * A connection's flags, sends, closes, pauses and resumes go to the transport that drew its
  * handle, and so does whether it takes a procedure (spec 9.11), every one for a transport that
@@ -116,32 +174,13 @@ const clockOf = (
 export const joinTransports = <const Transports extends readonly IJoinableTransportServer[]>(
   transports: Transports
 ): IJoinedTransportServer<Transports> => {
-  const [first] = transports;
-
-  if (first === undefined) {
-    throw new ProgrammerError('a join takes one transport at least');
-  }
-
+  const { clock, types } = judgeJoin(transports);
   const byType = new Map<string, IJoinableTransportServer>();
 
-  for (const transport of transports) {
-    // a join names no type of its own, past the types, so its handles would be no one's
-    if (typeof transport.type !== 'string') {
-      throw new ProgrammerError(
-        'a join takes transports that name the type of their handles, never a join'
-      );
-    }
-
-    if (byType.has(transport.type)) {
-      throw new ProgrammerError(
-        `a join takes one transport of each type: two are ${transport.type}, whose handles might be one`
-      );
-    }
-
-    byType.set(transport.type, transport);
+  for (const [index, type] of types.entries()) {
+    byType.set(type, transports[index] as IJoinableTransportServer);
   }
 
-  const clock = clockOf(first, transports);
   // its dispose, which every later one shares
   let disposed: Promise<void> | undefined;
   const emitter = createEmitter<TransportServerEventMap>();

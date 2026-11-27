@@ -34,9 +34,13 @@ public sealed class JoinedServerTransport : IServerTransport, IAsyncDisposable
     private readonly bool _namesProcedures;
 
     /// <summary>
-    /// A join of <paramref name="transports"/>, each told on from now. None, one that names no type
-    /// — a join among them — two of one type, and two on different clocks are each an
-    /// <see cref="ArgumentException"/>.
+    /// A join of <paramref name="transports"/>, each told on from now. It is refused for the first
+    /// of its rules any transport breaks, each judged over every transport before the next (spec
+    /// 15.14): none, an <see cref="ArgumentException"/>; one that is null, an
+    /// <see cref="ArgumentNullException"/>; then, each an <see cref="ArgumentException"/>, one that
+    /// names no type, as a join names none; two of one type, the first type given again named; one
+    /// on a clock other than the first's. Each transport's type is read once, in order, and only then
+    /// each one's clock; what a transport throws as it is read reaches the caller as thrown.
     /// </summary>
     public JoinedServerTransport(IReadOnlyList<IServerTransport> transports)
     {
@@ -47,28 +51,50 @@ public sealed class JoinedServerTransport : IServerTransport, IAsyncDisposable
             throw new ArgumentException("a join takes one transport at least", nameof(transports));
         }
 
-        var byType = new Dictionary<string, IServerTransport>(StringComparer.Ordinal);
-
         foreach (var transport in transports)
         {
             ArgumentNullException.ThrowIfNull(transport, nameof(transports));
+        }
 
-            if (transport.Type is not { } type)
-            {
-                throw new ArgumentException("a join takes transports that name the type of their handles, never a join", nameof(transports));
-            }
+        // ! each rule is judged over every transport before the next, so a refusal for a later rule
+        // tells that every earlier one holds (spec 15.14); each type is read once, then each clock
+        var types = transports.Select((transport) =>
+        {
+            return transport.Type;
+        }).ToArray();
 
+        if (types.Any((type) =>
+        {
+            return type is null;
+        }))
+        {
+            throw new ArgumentException("a join takes transports that name the type of their handles, never a join", nameof(transports));
+        }
+
+        var byType = new Dictionary<string, IServerTransport>(StringComparer.Ordinal);
+
+        // every type is named, as the rule before holds
+        foreach (var (transport, type) in transports.Zip(types))
+        {
             // ! a handle tells two types apart, never two transports of one type, whose ranks each
             // count from 1 (decision 0025)
-            if (!byType.TryAdd(type, transport))
+            if (!byType.TryAdd(type!, transport))
             {
                 throw new ArgumentException($"a join takes one transport of each type: two are {type}, whose handles might be one", nameof(transports));
             }
+        }
 
-            if (!ReferenceEquals(transport.Clock, transports[0].Clock))
-            {
-                throw new ArgumentException("a join's transports run on one clock", nameof(transports));
-            }
+        var clocks = transports.Select((transport) =>
+        {
+            return transport.Clock;
+        }).ToArray();
+
+        if (clocks.Any((clock) =>
+        {
+            return !ReferenceEquals(clock, clocks[0]);
+        }))
+        {
+            throw new ArgumentException("a join's transports run on one clock", nameof(transports));
         }
 
         _transports = [.. transports];
