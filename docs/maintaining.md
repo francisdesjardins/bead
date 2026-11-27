@@ -328,6 +328,73 @@ alias of an example's TypeScript half, Google.Protobuf and protobuf's Python lib
 conformance runner and protoc's pin, the Rust toolchain and a .NET major. An update lands as any change does: on a `feature/deps-…` branch, a `build(deps): …` commit
 each, judged by CI on the pushed branch, then finished by `tools/flow.mjs`.
 
+### Platform drift
+
+[`drift.yml`](../.github/workflows/drift.yml) runs every Thursday at 09:43 UTC and by hand. It
+runs the suites on the latest .NET 10 SDK and runtime patch, Node 26.x and 24.x, and Rust stable.
+Read its results under **Actions → Platform drift**. Each job names its platform; its log and the
+run's summary give the versions used. A red job means a suite or a check fails on that platform,
+or its setup fails; read the failed step before attributing it to the patch. The workflow's failure
+notice is the alert. The run gates no merge and stays outside `CI ok`.
+
+A team runs the suites in an environment with the runtime it ships. Use a disposable checkout.
+For C#, give that environment the intended .NET 10 runtime patch and an SDK that builds the side.
+Set the checkout's `global.json` SDK entry to that SDK, keeping `test.runner` as
+`Microsoft.Testing.Platform`. Install the TypeScript dependencies below first: the C# suite starts
+its interop server. From `implementations/dotnet`:
+
+```sh
+dotnet --info
+dotnet build Bead.slnx
+dotnet test --solution Bead.slnx --filter-not-trait "server=Rust"
+```
+
+For TypeScript, select the Node version the application runs. From `implementations/typescript`:
+
+```sh
+node --version
+node .yarn/releases/yarn-4.18.1.cjs install --immutable
+(cd ../../builder && node .yarn/releases/yarn-4.18.1.cjs install --immutable)
+node .yarn/releases/yarn-4.18.1.cjs check
+node .yarn/releases/yarn-4.18.1.cjs test --grep-invert "the (C#|Rust) server of the interop service"
+```
+
+For Rust, replace `stable` with the toolchain used to build the shipped binary. From
+`implementations/rust`:
+
+```sh
+export RUSTUP_TOOLCHAIN=stable
+rustc --version
+cargo test --workspace --all-features --locked
+cargo clippy --workspace --all-targets --all-features --locked
+```
+
+These commands keep the dependency locks fixed. Rust's denied warnings and lints make a lint
+introduced by stable fail the clippy step. Broker cases skip without a broker; the
+[README's interop instructions](../README.md#interop-both-ways) give the fuller run.
+
+Bead's Kestrel limits live in
+[`HttpTransportServer.cs`](../implementations/dotnet/src/Bead.Transport.Http/HttpTransportServer.cs)
+and
+[`WebSocketTransportServer.cs`](../implementations/dotnet/src/Bead.Transport.WebSockets/WebSocketTransportServer.cs),
+in their `ConfigureKestrel` blocks. The TypeScript counterparts are
+[`http-transport-server.ts`](../implementations/typescript/src/transport/server/http-transport-server.ts)
+and
+[`websocket-transport-server.ts`](../implementations/typescript/src/transport/server/websocket-transport-server.ts),
+with Node's head and socket bounds in
+[`server-bounds.ts`](../implementations/typescript/src/transport/server/server-bounds.ts). Rust's
+server settings live in
+[`http/server.rs`](../implementations/rust/crates/bead/src/http/server.rs) and
+[`websocket/server.rs`](../implementations/rust/crates/bead/src/websocket/server.rs), with hyper's
+HTTP/1.1 and HTTP/2 builders in
+[`http/wire.rs`](../implementations/rust/crates/bead/src/http/wire.rs).
+
+Take a security patch even when it breaks a test. Read the failing test and its row of
+[`docs/support.md`](support.md#differences); rows of kind `platform` say which behaviour belongs
+to the platform. Patch Bead's settings where needed. A platform's own compatibility mechanism,
+such as .NET's `AppContext` switches, belongs to that platform's documentation. It is no Bead
+setting, and any use follows the platform's documented scope and security consequences.
+
 ### The page, rebuilt and deployed
 
 After a change to the wire or to what the page states, change both languages alike, then, from

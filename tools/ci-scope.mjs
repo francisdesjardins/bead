@@ -182,7 +182,7 @@ export const RULES = Object.freeze([
       '.claude/**',
       '.githooks/**',
       '.github/dependabot.yml',
-      '.github/workflows/{bench,fuzz,guides,image}.yml',
+      '.github/workflows/{bench,drift,fuzz,guides,image}.yml',
       'docs/decisions/**',
       'docs/guides/**',
       'docs/maintaining.md',

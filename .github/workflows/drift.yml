@@ -1,0 +1,104 @@
+name: Platform drift
+
+on:
+  schedule:
+    # Thursdays, 09:43 UTC, apart from Monday's dependency updates and fuzz campaign.
+    - cron: '43 9 * * 4'
+  workflow_dispatch:
+
+concurrency:
+  group: platform-drift
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  YARN: node .yarn/releases/yarn-4.18.1.cjs
+  PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: 1
+
+jobs:
+  dotnet:
+    name: C# (.NET 10, latest SDK and runtime patch)
+    runs-on: ubuntu-26.04
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: implementations/dotnet
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
+        with:
+          dotnet-version: '10.0.x'
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '26'
+          check-latest: true
+      # The test runner stays Microsoft.Testing.Platform; only the checkout's SDK selection moves.
+      - name: Select the newest installed .NET 10 SDK
+        run: >-
+          node -e "const fs = require('node:fs'); const path = 'global.json';
+          const config = JSON.parse(fs.readFileSync(path, 'utf8'));
+          config.sdk = { version: '10.0.100', rollForward: 'latestFeature', allowPrerelease: false };
+          fs.writeFileSync(path, JSON.stringify(config, null, 2) + '\n');"
+      - name: .NET SDK and runtime versions
+        run: |
+          dotnet --info
+          dotnet --list-runtimes
+          echo "C#: .NET SDK $(dotnet --version)" >> "$GITHUB_STEP_SUMMARY"
+          dotnet --list-runtimes >> "$GITHUB_STEP_SUMMARY"
+      # CI's C# tests start the TypeScript interop server; no broker is started by this workflow.
+      - run: $YARN install --immutable
+        working-directory: implementations/typescript
+      - run: dotnet build Bead.slnx
+      - run: dotnet test --solution Bead.slnx --filter-not-trait "server=Rust"
+
+  typescript:
+    name: TypeScript (Node ${{ matrix.node }}.x, latest patch)
+    runs-on: ubuntu-26.04
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        node: ['26', '24']
+    defaults:
+      run:
+        working-directory: implementations/typescript
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: ${{ matrix.node }}
+          check-latest: true
+      - name: Node version
+        run: |
+          node --version
+          echo "TypeScript: Node $(node --version)" >> "$GITHUB_STEP_SUMMARY"
+      - run: $YARN install --immutable
+      # The demo's type-check imports the builder's types.
+      - run: $YARN install --immutable
+        working-directory: builder
+      - run: $YARN check
+      - run: $YARN test --grep-invert "the (C#|Rust) server of the interop service"
+
+  rust:
+    name: Rust (stable)
+    runs-on: ubuntu-26.04
+    timeout-minutes: 25
+    defaults:
+      run:
+        working-directory: implementations/rust
+    env:
+      RUSTUP_TOOLCHAIN: stable
+      CARGO_TERM_COLOR: always
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - run: rustup toolchain install stable --profile minimal --component clippy
+      - name: Rust version
+        run: |
+          rustc --version
+          echo "Rust: $(rustc --version)" >> "$GITHUB_STEP_SUMMARY"
+      # The lock holds the dependencies fixed so a failure names toolchain drift.
+      - run: cargo test --workspace --all-features --locked
+      # A lint introduced by stable fails here under the workspace's denied warnings and lints.
+      - run: cargo clippy --workspace --all-targets --all-features --locked
