@@ -1081,7 +1081,8 @@ test.describe('createAmqpBrokerAdapter', () => {
     expect(attachesOf(last, { address: NAME_QUEUE, role: 'receiver' })).toHaveLength(1);
     expect([downs.length, adapter.isLinked]).toEqual([2, true]);
 
-    // * let go while its receiver is attached again: let go at once, and that ATTACH never held
+    // * let go while its receiver is attached again: let go at once, its session ended before
+    // that ATTACH is answered, and given no credit when that answer comes late (AMQP 1.0 §2.5.5)
     await adapter.subscribe(NAME);
     script.policy.attach = ({ address }) => {
       return address === NAME_QUEUE ? 'hold' : 'take';
@@ -1095,14 +1096,159 @@ test.describe('createAmqpBrokerAdapter', () => {
     await last.until(() => {
       return last.sessions.length === begun + 1;
     });
+
+    const reattaching = last.sessions.at(-1);
+
+    script.policy.end = (session) => {
+      return session === reattaching ? 'hold' : 'answer';
+    };
     await adapter.unsubscribe(NAME);
     await last.until(() => {
-      return last.ended.includes(last.sessions.at(-1) as never);
+      return last.endsHeld.includes(reattaching as never);
     });
+
+    const attached = last.attaches.length;
+
     last.releaseAttaches();
+    await sleep(100);
+    expect(
+      last.attaches.slice(attached).map((attach) => {
+        return creditOf(attach.link as Sender);
+      })
+    ).toEqual([0]);
+    last.releaseEnds();
     await sleep(100);
     expect([downs.length, adapter.isLinked]).toEqual([2, true]);
     await adapter.stop();
+
+    // * subscribed again as it attaches again: held at once, its one receiver credited once its
+    // ATTACH is answered
+    script.policy.attach = () => {
+      return 'take';
+    };
+    script.policy.end = () => {
+      return 'answer';
+    };
+
+    const subscribing = await inboxUp({ adapter, script });
+
+    await adapter.subscribe(NAME);
+    script.policy.attach = ({ address }) => {
+      return address === NAME_QUEUE ? 'hold' : 'take';
+    };
+
+    const opened = subscribing.sessions.length;
+    const taken = subscribing.attaches.length;
+
+    attachesOf(subscribing, { address: NAME_QUEUE, role: 'receiver' })
+      .at(-1)
+      ?.link.close({ condition: 'amqp:resource-deleted' });
+    await subscribing.until(() => {
+      return subscribing.sessions.length === opened + 1;
+    });
+    await adapter.subscribe(NAME);
+    subscribing.releaseAttaches();
+    await sleep(100);
+    expect(subscribing.sessions).toHaveLength(opened + 1);
+    expect(
+      subscribing.attaches.slice(taken).map((attach) => {
+        return creditOf(attach.link as Sender);
+      })
+    ).toEqual([1]);
+    expect([downs.length, adapter.isLinked]).toEqual([2, true]);
+    await adapter.stop();
+  });
+
+  test('holds one receiver of a name subscribed again after an unsubscription met it as it attached again, the one let go given no credit, whether or not its ATTACH is answered (spec 15.34)', async () => {
+    const adapter = adapterOf(script);
+    const { downs } = heardOf(adapter);
+
+    for (const isAnswered of [true, false]) {
+      script.policy.attach = () => {
+        return 'take';
+      };
+      script.policy.end = () => {
+        return 'answer';
+      };
+
+      const link = await inboxUp({ adapter, script });
+
+      await adapter.subscribe(NAME);
+      script.policy.attach = ({ address }) => {
+        return address === NAME_QUEUE ? 'hold' : 'take';
+      };
+
+      // its broker ends the name's receiver: attached again, its ATTACH held
+      const begun = link.sessions.length;
+
+      attachesOf(link, { address: NAME_QUEUE, role: 'receiver' })
+        .at(-1)
+        ?.link.close({ condition: 'amqp:resource-deleted' });
+      await link.until(() => {
+        return link.sessions.length === begun + 1;
+      });
+
+      const reattaching = link.sessions.at(-1);
+
+      script.policy.end = (session) => {
+        return session === reattaching ? 'hold' : 'answer';
+      };
+
+      // * let go, then subscribed anew, as it attaches again
+      await adapter.unsubscribe(NAME);
+      await link.until(() => {
+        return link.endsHeld.includes(reattaching as never);
+      });
+
+      const attached = link.attaches.length;
+
+      if (isAnswered) {
+        script.policy.attach = () => {
+          return 'take';
+        };
+        link.releaseAttaches();
+      }
+
+      script.policy.attach = () => {
+        return 'take';
+      };
+      await adapter.subscribe(NAME);
+      await sleep(100);
+
+      // * its ATTACH answered late, or never: the receiver let go is given no credit, and its
+      // session ends; the one subscribed anew alone holds the name
+      const credits = link.attaches
+        .slice(attached)
+        .filter((attach) => {
+          return attach.address === NAME_QUEUE && attach.role === 'receiver';
+        })
+        .map((attach) => {
+          return [attach.session === reattaching, creditOf(attach.link as Sender)];
+        });
+
+      expect(credits).toEqual(
+        isAnswered
+          ? [
+              [true, 0],
+              [false, 1],
+            ]
+          : [[false, 1]]
+      );
+      link.releaseEnds();
+      await sleep(100);
+
+      // * its next let-go detaches that one, and leaves no receiver of the name behind
+      const detached = link.detached.length;
+
+      await adapter.unsubscribe(NAME);
+      expect(
+        link.detached.slice(detached).map((attach) => {
+          return attach.session === reattaching;
+        })
+      ).toEqual([false]);
+      expect([downs.length, adapter.isLinked]).toEqual([0, true]);
+      await adapter.stop();
+    }
   });
 
   test('refuses each publication a sending session held as it ends, keeps its link, and begins another for the next (spec 15.33)', async () => {

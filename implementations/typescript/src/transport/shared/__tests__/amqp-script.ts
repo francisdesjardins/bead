@@ -66,6 +66,8 @@ export interface IAmqpScriptPolicy {
   credit: number;
   /** A DETACH of the adapter's answered, or held unanswered until a test releases it. */
   detach: (attach: Pick<IScriptedAttach, 'address' | 'role'>) => 'answer' | 'hold';
+  /** An END of the adapter's answered, or held unanswered until a test releases it. */
+  end: (session: Session) => 'answer' | 'hold';
   /** The max-message-size the script's ATTACH names to each of the adapter's senders. */
   maximumMessageSize: number | undefined;
   /** How each publication is settled, or `hold` to settle it later. */
@@ -87,6 +89,8 @@ export interface IAmqpScriptedLink {
   readonly detached: IScriptedAttach[];
   /** The sessions the adapter ended, in their order. */
   readonly ended: Session[];
+  /** The sessions whose END the policy holds, in their order, what the adapter sends on them still read. */
+  readonly endsHeld: Session[];
   /** Whether the adapter's end of it closed. */
   readonly isClosed: boolean;
   /** The adapter's OPEN. */
@@ -112,6 +116,8 @@ export interface IAmqpScriptedLink {
   releaseAttaches(): void;
   /** Answers each DETACH the policy held, in its order. */
   releaseDetaches(): void;
+  /** Answers each END the policy held, in its order. */
+  releaseEnds(): void;
   /** Holds until `isDone`, within `within` ms; refuses past it. */
   until(isDone: () => boolean, options?: { within?: number | undefined }): Promise<void>;
 }
@@ -197,6 +203,9 @@ export const createAmqpScript = async (options?: {
     detach: () => {
       return 'answer';
     },
+    end: () => {
+      return 'answer';
+    },
     maximumMessageSize: undefined,
     settle: () => {
       return 'accepted';
@@ -236,6 +245,8 @@ export const createAmqpScript = async (options?: {
     const sessions: Session[] = [];
     const held: (() => void)[] = [];
     const heldDetaches: (() => void)[] = [];
+    const endsHeld: Session[] = [];
+    const heldEnds: (() => void)[] = [];
     let isClosed = false;
     let closeFrame: { error?: unknown } | undefined;
     const socket = (connection as unknown as { socket: Socket }).socket;
@@ -263,9 +274,22 @@ export const createAmqpScript = async (options?: {
     const onEnd = mapped.on_end;
 
     mapped.on_end = (frame) => {
-      onEnd.call(connection, frame);
-      // oxlint-disable-next-line typescript/no-dynamic-delete -- rhea's own map, by channel
-      delete mapped.remote_channel_map[frame.channel];
+      const answer = (): void => {
+        onEnd.call(connection, frame);
+        // oxlint-disable-next-line typescript/no-dynamic-delete -- rhea's own map, by channel
+        delete mapped.remote_channel_map[frame.channel];
+      };
+      const session = mapped.remote_channel_map[frame.channel] as Session | undefined;
+
+      // * an END the policy holds is answered once a test releases it, its channel still read
+      if (session !== undefined && policy.end(session) === 'hold') {
+        endsHeld.push(session);
+        heldEnds.push(answer);
+
+        return;
+      }
+
+      answer();
     };
 
     // the script's sender paired with the management receiver of the session, which answers
@@ -520,6 +544,7 @@ export const createAmqpScript = async (options?: {
       deliveries,
       detached,
       ended,
+      endsHeld,
       get isClosed() {
         return isClosed;
       },
@@ -571,6 +596,11 @@ export const createAmqpScript = async (options?: {
       },
       releaseDetaches: () => {
         for (const release of heldDetaches.splice(0)) {
+          release();
+        }
+      },
+      releaseEnds: () => {
+        for (const release of heldEnds.splice(0)) {
           release();
         }
       },

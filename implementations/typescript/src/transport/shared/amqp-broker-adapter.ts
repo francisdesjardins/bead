@@ -1090,6 +1090,13 @@ export const createAmqpBrokerAdapter = (options: IAmqpBrokerAdapterOptions): IAm
           return;
         }
 
+        // ! an ATTACH answered on a session whose END went, as a name let go as it attached again
+        // ends it: that session still reads but sends nothing, no credit among it (AMQP 1.0
+        // §2.5.5), and its end settles what waits on it
+        if (!session.is_open()) {
+          return;
+        }
+
         // * its inbox's receiver `linkCredit`; a name's 1, so that its queue hands a member one
         // OPEN at a time, the others waiting there for whichever member reads next (AMQP 1.0
         // §2.6.7)
