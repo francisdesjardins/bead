@@ -1512,7 +1512,7 @@ public sealed class AmqpBrokerAdapter : IBrokerAdapter, IAsyncDisposable
         var queue = AmqpMessages.QueueAddressOf(name);
 
         // * one attached again, let go before its session began: that session ended at once
-        if (again is not null && !Stands((link, again, receiving), false))
+        if (again is not null && !Stands(new Standing(link, again, receiving), false))
         {
             return receiving;
         }
@@ -1522,7 +1522,7 @@ public sealed class AmqpBrokerAdapter : IBrokerAdapter, IAsyncDisposable
             await begun.WaitAsync(token);
 
             // ! nor any link begun on a session its let-go ended
-            if (again is not null && !Stands((link, again, receiving), false))
+            if (again is not null && !Stands(new Standing(link, again, receiving), false))
             {
                 return receiving;
             }
@@ -1560,7 +1560,7 @@ public sealed class AmqpBrokerAdapter : IBrokerAdapter, IAsyncDisposable
             // unsubscription lets it go by its DETACH, which its connection's reader reads only after
             // each message it read before, so that no OPEN reaches its participant once its let-go
             // settled (spec 15.21). One let go before is given no credit, its session ended
-            if (again is not null && !Stands((link, again, receiving), true))
+            if (again is not null && !Stands(new Standing(link, again, receiving), true))
             {
                 return receiving;
             }
@@ -1625,7 +1625,7 @@ public sealed class AmqpBrokerAdapter : IBrokerAdapter, IAsyncDisposable
     // whether a name attached again still stands, its receiving its own; at its credit, held by its
     // link in its place. One let go meanwhile, or whose link ended or is stopping, has its session
     // ended, no credit
-    private bool Stands((Incarnation Link, Reattachment Again, Receiving Receiving) standing, bool isCredited)
+    private bool Stands(Standing standing, bool isCredited)
     {
         var (link, again, receiving) = standing;
 
@@ -1984,6 +1984,10 @@ public sealed class AmqpBrokerAdapter : IBrokerAdapter, IAsyncDisposable
             _isEndedByBroker = true;
         }
     }
+
+    // a receiver attached again, judged whether it still stands: its link, its reattachment and the
+    // receiving it draws
+    private sealed record Standing(Incarnation Link, Reattachment Again, Receiving Receiving);
 
     // a held name attached again: the receiving it draws once its session begins, and whether an
     // unsubscription let it go before its credit went
