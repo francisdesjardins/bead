@@ -38,6 +38,12 @@ public sealed class AmqpBrokerAdapterTests : IAsyncLifetime
     private const string Scripted = "scripted";
     private const string Fixture = "fixture";
 
+    // when the ATTACH of a reattach let go is answered: before its name is subscribed anew, after
+    // it, or never
+    private const string Before = "before";
+    private const string After = "after";
+    private const string Never = "never";
+
     private const string InboxQueue = "/queues/bead.i.ada";
     private const string NameQueue = "/queues/bead.s.interop";
 
@@ -1484,11 +1490,14 @@ public sealed class AmqpBrokerAdapterTests : IAsyncLifetime
             from: mark);
         await letting.AnswerAttach(reattaching);
         await Task.Delay(100, Cancelled);
+
+        // ! the library's guarantee, not the adapter's: AMQPNetLite refuses all but an END once its
+        // session sent its END, and the script cuts on any frame past it (AMQP 1.0 §2.5.5)
         Assert.DoesNotContain(letting.Frames.Skip(mark), (frame) =>
         {
             return frame.Channel == reattaching.Channel && frame.Performative is Flow { HasHandle: true };
         });
-        await letting.End(reattaching.Channel);
+        await letting.AnswerEnd(reattaching.Channel);
         await Task.Delay(100, Cancelled);
         Assert.Equal((true, 2), (adapter.IsLinked, downs.Count));
         await adapter.Stop();
@@ -1535,12 +1544,12 @@ public sealed class AmqpBrokerAdapterTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task Holds_one_receiver_of_a_name_subscribed_again_after_an_unsubscription_met_it_as_it_attached_again_the_one_let_go_given_no_credit_whether_or_not_its_ATTACH_is_answered_spec_15_34()
+    public async Task Holds_one_receiver_of_a_name_subscribed_again_after_an_unsubscription_met_it_as_it_attached_again_the_one_let_go_given_no_credit_whether_its_ATTACH_is_answered_before_that_subscription_after_it_or_never_spec_15_33()
     {
         await using var adapter = AdapterOf();
         var (_, downs) = HeardOf(adapter);
 
-        foreach (var isAnswered in new[] { true, false })
+        foreach (var answered in new[] { Before, After, Never })
         {
             var connection = await LinkUp((adapter, _script));
             ushort? ending = null;
@@ -1569,9 +1578,22 @@ public sealed class AmqpBrokerAdapterTests : IAsyncLifetime
 
             ending = reattaching.Channel;
 
-            // * let go, then subscribed anew, as it attaches again
+            // * let go as it attaches again: its session ended at once, before its ATTACH is answered
             await adapter.Unsubscribe(Name).WaitAsync(Patience, Cancelled);
+            await connection.Next(
+                (frame) =>
+                {
+                    return frame.Performative is AmqpEnd && frame.Channel == reattaching.Channel;
+                },
+                from: mark);
 
+            if (answered == Before)
+            {
+                await connection.AnswerAttach(reattaching);
+                await Task.Delay(100, Cancelled);
+            }
+
+            // * then subscribed anew: a receiver of its own, on a session of its own, credited
             var subscribing = adapter.Subscribe(Name);
             var fresh = await connection.Next(
                 (frame) =>
@@ -1583,29 +1605,24 @@ public sealed class AmqpBrokerAdapterTests : IAsyncLifetime
             await connection.AnswerAttach(fresh);
             await subscribing.WaitAsync(Patience, Cancelled);
 
-            // * its ATTACH answered late, or never: the receiver let go is given no credit, and its
-            // session ends; the one subscribed anew alone holds the name
-            if (isAnswered)
+            if (answered == After)
             {
                 await connection.AnswerAttach(reattaching);
             }
 
             await Task.Delay(100, Cancelled);
-            Assert.DoesNotContain(connection.Frames.Skip(mark), (frame) =>
-            {
-                return frame.Channel == reattaching.Channel && frame.Performative is Flow { HasHandle: true };
-            });
             Assert.Contains(connection.Frames.Skip(mark), (frame) =>
             {
                 return frame.Channel == fresh.Channel && frame.Performative is Flow { HasHandle: true };
             });
-            await connection.Next(
-                (frame) =>
-                {
-                    return frame.Performative is AmqpEnd && frame.Channel == reattaching.Channel;
-                },
-                from: mark);
-            await connection.End(reattaching.Channel);
+
+            // ! the library's guarantee, not the adapter's: AMQPNetLite refuses all but an END once its
+            // session sent its END, and the script cuts on any frame past it (AMQP 1.0 §2.5.5)
+            Assert.DoesNotContain(connection.Frames.Skip(mark), (frame) =>
+            {
+                return frame.Channel == reattaching.Channel && frame.Performative is Flow { HasHandle: true };
+            });
+            await connection.AnswerEnd(reattaching.Channel);
 
             // * its next let-go detaches that one, and leaves no receiver of the name behind
             _script.Holding = (_) =>
@@ -1627,6 +1644,323 @@ public sealed class AmqpBrokerAdapterTests : IAsyncLifetime
             Assert.Equal((true, 0), (adapter.IsLinked, downs.Count));
             await adapter.Stop();
         }
+    }
+
+    [Fact]
+    public async Task Holds_a_name_its_broker_ended_as_it_first_attached_by_its_reattachment_alone_so_that_an_unsubscription_as_it_attaches_again_ends_that_session_and_a_later_subscription_attaches_anew_spec_15_33()
+    {
+        await using var adapter = AdapterOf();
+        var (_, downs) = HeardOf(adapter);
+        var connection = await LinkUp((adapter, _script));
+        var reached = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var released = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var credited = 0;
+        ushort? ending = null;
+
+        // * met once its first receiver's credit went and before its subscription settles, as no
+        // broker can be made to time
+        adapter.NameCredited = async (token) =>
+        {
+            if (Interlocked.Increment(ref credited) == 1)
+            {
+                reached.TrySetResult();
+                await released.Task.WaitAsync(token);
+            }
+        };
+
+        // * its broker ends its first receiver as soon as it attached: subscribed, and attached again
+        var mark = connection.Mark;
+        var subscribing = adapter.Subscribe(Name);
+
+        await reached.Task.WaitAsync(Patience, Cancelled);
+        _script.Holding = (frame) =>
+        {
+            return IsAttachOf(frame, NameQueue) || (frame.Performative is AmqpEnd && frame.Channel == ending);
+        };
+
+        var first = connection.LinkOf(NameQueue);
+        var answered = connection.Mark;
+
+        await connection.Detach(first, new Error(new Symbol("amqp:resource-deleted")));
+
+        var reattaching = await connection.Next(
+            (frame) =>
+            {
+                return IsAttachOf(frame, NameQueue);
+            },
+            from: answered);
+
+        released.TrySetResult();
+        await subscribing.WaitAsync(Patience, Cancelled);
+        ending = reattaching.Channel;
+
+        // * let go as it attaches again: that session ended at once, before its ATTACH is answered
+        await adapter.Unsubscribe(Name).WaitAsync(Patience, Cancelled);
+        await connection.Next(
+            (frame) =>
+            {
+                return frame.Performative is AmqpEnd && frame.Channel == reattaching.Channel;
+            },
+            from: answered);
+        await connection.AnswerAttach(reattaching);
+        await Task.Delay(100, Cancelled);
+
+        // ! the library's guarantee, not the adapter's: AMQPNetLite refuses all but an END once its
+        // session sent its END, and the script cuts on any frame past it (AMQP 1.0 §2.5.5)
+        Assert.DoesNotContain(connection.Frames.Skip(answered), (frame) =>
+        {
+            return frame.Channel == reattaching.Channel && frame.Performative is Flow { HasHandle: true };
+        });
+        await connection.AnswerEnd(reattaching.Channel);
+
+        // * subscribed later: attached anew, and credited
+        _script.Holding = (_) =>
+        {
+            return false;
+        };
+
+        var anew = connection.Mark;
+
+        await adapter.Subscribe(Name).WaitAsync(Patience, Cancelled);
+
+        var attached = await connection.Next(
+            (frame) =>
+            {
+                return IsAttachOf(frame, NameQueue);
+            },
+            from: anew);
+
+        await connection.Next(
+            (frame) =>
+            {
+                return frame.Channel == attached.Channel && frame.Performative is Flow { HasHandle: true };
+            },
+            from: anew);
+        Assert.Equal((true, 0), (adapter.IsLinked, downs.Count));
+        await adapter.Stop();
+    }
+
+    [Fact]
+    public async Task Lets_a_name_attached_again_go_once_what_it_handed_on_was_settled_its_DETACH_after_its_DISPOSITION_held_from_before_its_credit_went_spec_15_33_15_34()
+    {
+        await using var adapter = AdapterOf();
+        var (messages, downs) = HeardOf(adapter);
+        var connection = await LinkUp((adapter, _script));
+        var reached = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var released = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        await adapter.Subscribe(Name).WaitAsync(Patience, Cancelled);
+
+        // * met once its credit went and before its reattach settles, as no broker can be made to time
+        adapter.NameCredited = async (token) =>
+        {
+            reached.TrySetResult();
+            await released.Task.WaitAsync(token);
+        };
+
+        var mark = connection.Mark;
+
+        await connection.Detach(connection.LinkOf(NameQueue), new Error(new Symbol("amqp:resource-deleted")));
+        await reached.Task.WaitAsync(Patience, Cancelled);
+
+        var again = connection.LinkOf(NameQueue);
+
+        await connection.Deliver((again, ParcelOf([1])));
+        await Until(() =>
+        {
+            return !messages.IsEmpty;
+        });
+
+        // * let go before what it handed on is settled: no DETACH until its DISPOSITION went
+        var unsubscribing = adapter.Unsubscribe(Name);
+
+        released.TrySetResult();
+        await Task.Delay(100, Cancelled);
+        Assert.False(unsubscribing.IsCompleted);
+        Assert.DoesNotContain(connection.Frames.Skip(mark), (frame) =>
+        {
+            return frame.Channel == again.Channel && frame.Performative is global::Amqp.Framing.Detach or AmqpEnd;
+        });
+        messages.Single().Settle();
+        await unsubscribing.WaitAsync(Patience, Cancelled);
+
+        var kinds = connection.Frames.Skip(mark).Where((frame) =>
+        {
+            return frame.Channel == again.Channel && frame.Performative is global::Amqp.Framing.Dispose or global::Amqp.Framing.Detach;
+        }).Select((frame) =>
+        {
+            return frame.Performative!.GetType().Name;
+        });
+
+        Assert.Equal(["Dispose", "Detach"], kinds);
+        Assert.Equal((true, 0), (adapter.IsLinked, downs.Count));
+        await adapter.Stop();
+    }
+
+    [Fact]
+    public async Task Stops_while_a_name_attaches_again_by_ending_that_session_at_once_its_receiver_given_no_credit_and_attaches_no_name_its_broker_ends_during_its_stop_spec_15_33()
+    {
+        await using var adapter = AdapterOf();
+        var (_, downs) = HeardOf(adapter);
+        var connection = await LinkUp((adapter, _script));
+        ushort? ending = null;
+
+        await adapter.Subscribe(Name).WaitAsync(Patience, Cancelled);
+
+        // its broker ends the name's receiver: attached again, its ATTACH held, and the deletion of
+        // its inbox that its stop asks held too
+        _script.Holding = (frame) =>
+        {
+            return IsAttachOf(frame, NameQueue) || (frame.Performative is AmqpEnd && frame.Channel == ending) || frame.Performative is AmqpTransfer;
+        };
+
+        var mark = connection.Mark;
+        var asked = connection.Transfers.Count((transfer) =>
+        {
+            return transfer.IsRequest;
+        });
+
+        await connection.Detach(connection.LinkOf(NameQueue), new Error(new Symbol("amqp:resource-deleted")));
+
+        var reattaching = await connection.Next(
+            (frame) =>
+            {
+                return IsAttachOf(frame, NameQueue);
+            },
+            from: mark);
+
+        ending = reattaching.Channel;
+
+        var stopping = adapter.Stop();
+        var (_, deleting) = await connection.NextRequest(asked);
+
+        // * its ATTACH answered as its stop deletes its inbox: its session ended, never credited
+        await connection.AnswerAttach(reattaching);
+        await Task.Delay(100, Cancelled);
+        Assert.DoesNotContain(connection.Frames.Skip(mark), (frame) =>
+        {
+            return frame.Channel == reattaching.Channel && frame.Performative is Flow { HasHandle: true };
+        });
+        Assert.Contains(connection.Frames.Skip(mark), (frame) =>
+        {
+            return frame.Performative is AmqpEnd && frame.Channel == reattaching.Channel;
+        });
+        _script.Holding = (_) =>
+        {
+            return false;
+        };
+        await connection.Answer(deleting, ("200", new Map { ["message_count"] = 0UL }));
+        await stopping.WaitAsync(Patience, Cancelled);
+        Assert.Equal((false, 0), (adapter.IsLinked, downs.Count));
+
+        // * a name its broker ends as its stop sends what it was handed is never attached again
+        var next = await LinkUp((adapter, _script));
+
+        await adapter.Subscribe(Name).WaitAsync(Patience, Cancelled);
+        _script.Holding = (frame) =>
+        {
+            return frame.Performative is AmqpTransfer;
+        };
+        asked = next.Transfers.Count;
+
+        var publishing = adapter.Publish(new BrokerPublication { Payload = (byte[])[1], Topic = Inbox });
+
+        await Until(() =>
+        {
+            return next.Transfers.Count > asked;
+        });
+
+        var stoppingNext = adapter.Stop();
+
+        mark = next.Mark;
+        await next.Detach(next.LinkOf(NameQueue), new Error(new Symbol("amqp:resource-deleted")));
+        await Task.Delay(100, Cancelled);
+        Assert.DoesNotContain(next.Frames.Skip(mark), (frame) =>
+        {
+            return frame.Performative is Begin || IsAttachOf(frame, NameQueue);
+        });
+        _script.Holding = (_) =>
+        {
+            return false;
+        };
+        await next.Settle(next.Transfers[asked], new Accepted());
+        await stoppingNext.WaitAsync(Patience, Cancelled);
+        Assert.Equal(BrokerPublished.Taken, await publishing.WaitAsync(Patience, Cancelled));
+        Assert.Equal((false, 0), (adapter.IsLinked, downs.Count));
+    }
+
+    [Fact]
+    public async Task Attaches_a_name_again_within_one_connectTimeout_past_which_its_link_is_lost_spec_15_33_15_37()
+    {
+        await using var adapter = AdapterOf((options) =>
+        {
+            return options with { ConnectTimeout = TimeSpan.FromMilliseconds(400) };
+        });
+        var (_, downs) = HeardOf(adapter);
+
+        // * its ATTACH answered within it: held and credited, its link kept
+        var within = await LinkUp((adapter, _script));
+
+        await adapter.Subscribe(Name).WaitAsync(Patience, Cancelled);
+        _script.Holding = (frame) =>
+        {
+            return IsAttachOf(frame, NameQueue);
+        };
+
+        var mark = within.Mark;
+
+        await within.Detach(within.LinkOf(NameQueue), new Error(new Symbol("amqp:resource-deleted")));
+
+        var answering = await within.Next(
+            (frame) =>
+            {
+                return IsAttachOf(frame, NameQueue);
+            },
+            from: mark);
+
+        await Task.Delay(200, Cancelled);
+        await within.AnswerAttach(answering);
+        await within.Next(
+            (frame) =>
+            {
+                return frame.Channel == answering.Channel && frame.Performative is Flow { HasHandle: true };
+            },
+            from: mark);
+        await Task.Delay(400, Cancelled);
+        Assert.Equal((true, 0), (adapter.IsLinked, downs.Count));
+        _script.Holding = (_) =>
+        {
+            return false;
+        };
+        await adapter.Stop();
+
+        // * not answered within it: its link lost
+        var past = await LinkUp((adapter, _script));
+
+        await adapter.Subscribe(Name).WaitAsync(Patience, Cancelled);
+        _script.Holding = (frame) =>
+        {
+            return IsAttachOf(frame, NameQueue);
+        };
+        mark = past.Mark;
+        await past.Detach(past.LinkOf(NameQueue), new Error(new Symbol("amqp:resource-deleted")));
+        await past.Next(
+            (frame) =>
+            {
+                return IsAttachOf(frame, NameQueue);
+            },
+            from: mark);
+        await Task.Delay(200, Cancelled);
+        Assert.Equal((true, 0), (adapter.IsLinked, downs.Count));
+        await Until(() =>
+        {
+            return !downs.IsEmpty;
+        });
+        Assert.Equal((false, 1), (adapter.IsLinked, downs.Count));
+        _script.Holding = (_) =>
+        {
+            return false;
+        };
     }
 
     [Theory]
@@ -2208,7 +2542,7 @@ public sealed class AmqpBrokerAdapterTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task Waits_subscribing_a_name_under_way_for_its_ATTACH_to_name_its_source_and_lets_a_name_whose_subscription_an_unsubscription_met_go_once_it_attached_never_held_spec_15_34()
+    public async Task Waits_subscribing_a_name_under_way_for_its_ATTACH_to_name_its_source_and_lets_a_name_whose_subscription_an_unsubscription_met_go_once_it_attached_given_no_credit_and_never_held_spec_15_34()
     {
         await using var adapter = AdapterOf();
         var (messages, downs) = HeardOf(adapter);
@@ -2249,8 +2583,8 @@ public sealed class AmqpBrokerAdapterTests : IAsyncLifetime
         Assert.Equal((2, 1), (held.Count, AttachesFrom(mark)));
         await adapter.Unsubscribe(Name).WaitAsync(Patience, Cancelled);
 
-        // * an unsubscription meets one under way: it is let go once attached, and never held, what
-        // its broker hands on before it answered its DETACH not handed on
+        // * an unsubscription meets one under way: it is let go once attached, given no credit, so
+        // that its broker sends it nothing before its DETACH, and never held
         _script.Holding = (frame) =>
         {
             return IsAttachOf(frame, NameQueue) || frame.Performative is global::Amqp.Framing.Detach;
@@ -2271,13 +2605,6 @@ public sealed class AmqpBrokerAdapterTests : IAsyncLifetime
         await connection.AnswerAttach(met);
 
         var metLink = connection.LinkOf(NameQueue);
-
-        await Until(() =>
-        {
-            return metLink.Credit > 0;
-        });
-        await connection.Deliver((metLink, ParcelOf([1])));
-
         var detaching = await connection.Next(
             (frame) =>
             {
@@ -2286,7 +2613,11 @@ public sealed class AmqpBrokerAdapterTests : IAsyncLifetime
             from: mark);
 
         await Task.Delay(100, Cancelled);
-        Assert.Equal((false, 0), (unsubscribing.IsCompleted, messages.Count));
+        Assert.DoesNotContain(connection.Frames.Skip(mark), (frame) =>
+        {
+            return frame.Channel == metLink.Channel && frame.Performative is Flow { HasHandle: true };
+        });
+        Assert.Equal((false, 0, 0L), (unsubscribing.IsCompleted, messages.Count, metLink.Credit));
         await connection.Send(detaching.Channel, new global::Amqp.Framing.Detach { Handle = metLink.Handle, Closed = true });
         await Task.WhenAll(subscribed, unsubscribing).WaitAsync(Patience, Cancelled);
         Assert.Empty(messages);

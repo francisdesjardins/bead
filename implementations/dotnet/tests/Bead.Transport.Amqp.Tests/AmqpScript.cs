@@ -471,6 +471,12 @@ internal sealed class ScriptedConnection
         await Write(frame);
     }
 
+    /// <summary>Answers an END of the adapter's that the test held, as the script answers one.</summary>
+    public Task AnswerEnd(ushort channel)
+    {
+        return Send(channel, new AmqpEnd());
+    }
+
     /// <summary>Answers an ATTACH: its terminus echoed, or, refusing it, a null one and a DETACH of <paramref name="refusal"/>.</summary>
     public async Task AnswerAttach(ScriptedFrame frame, Error? refusal = null)
     {
