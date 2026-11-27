@@ -1002,20 +1002,23 @@ export const printRustValidators = (
       const body = [
         `${INDENT}let set = [${counted.join(', ')}].into_iter().filter(|set| *set).count();`,
         '',
-        `${INDENT}if set > 1 && sink.add(&${many}, ${RULE_VALUE}::Absent) {`,
-        `${INDENT}${INDENT}return true;`,
-        `${INDENT}}`,
-        '',
       ];
 
-      if (rule.none !== undefined) {
+      if (rule.none === undefined) {
+        body.push(`${INDENT}set > 1 && sink.add(&${many}, ${RULE_VALUE}::Absent)`);
+      } else {
         const none = siteOf(rule.none, `${prefix}_ONEOF_${String(at)}_NONE`);
 
         body.push(
+          `${INDENT}if set > 1 && sink.add(&${many}, ${RULE_VALUE}::Absent) {`,
+          `${INDENT}${INDENT}return true;`,
+          `${INDENT}}`,
+          '',
           `${INDENT}if set == 0 && sink.add(&${none}, ${RULE_VALUE}::Absent) {`,
           `${INDENT}${INDENT}return true;`,
           `${INDENT}}`,
-          ''
+          '',
+          `${INDENT}false`
         );
       }
 
@@ -1026,7 +1029,6 @@ export const printRustValidators = (
           `// (buf.validate.message).oneof ${String(at)}`,
           `fn ${name}(message: &${type}, sink: ${SINK}) -> bool {`,
           ...body,
-          `${INDENT}false`,
           '}',
         ],
       });
