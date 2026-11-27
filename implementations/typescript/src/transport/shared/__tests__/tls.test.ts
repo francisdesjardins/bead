@@ -42,6 +42,17 @@ const refusalOf = (tls: Parameters<typeof assertTls>[0]): string => {
 // definition
 
 test.describe('assertTls', () => {
+  test('refuses a TLS private key whose PEM label is valid and whose DER is not', () => {
+    for (const label of ['PRIVATE KEY', 'EC PRIVATE KEY', 'RSA PRIVATE KEY']) {
+      expect(
+        refusalOf({
+          certificate: PKI.clientChain,
+          key: `-----BEGIN ${label}-----\nAAAA\n-----END ${label}-----\n`,
+        })
+      ).toBe('key reads as no key');
+    }
+  });
+
   // spec 15.39
   test('refuses as it is built a certificate without its key or a key without its certificate, a key of another, an encrypted one, and a certificate or authorities that read as no certificate', () => {
     expect(refusalOf({ certificate: PKI.clientChain })).toBe(NOT_PAIRED);

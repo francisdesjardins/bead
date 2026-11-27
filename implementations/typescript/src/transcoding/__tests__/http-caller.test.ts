@@ -29,6 +29,26 @@ const urlOf = (port: number): string => {
   return `http://127.0.0.1:${String(port)}`;
 };
 
+test('refuses a subscription credential with boundary whitespace before sending', async () => {
+  let sent = 0;
+  const client = new TranscodingHttpClient('http://localhost', {
+    fetch: () => {
+      sent += 1;
+      throw new Error('a refused credential reaches no fetch');
+    },
+  });
+  for (const authorization of [' Bearer good', 'Bearer good ', '\tBearer good', 'Bearer good\t']) {
+    const subscription = client.subscribeWatch({}, { authorization })[Symbol.asyncIterator]();
+    await expect(subscription.next()).rejects.toThrow(
+      new ProgrammerError(
+        'a credential holds visible ASCII, spaces and tabs alone, none first or last'
+      )
+    );
+    expect(await subscription.next()).toEqual({ done: true, value: undefined });
+  }
+  expect(sent).toBe(0);
+});
+
 const stubOf = (
   body: string,
   options: { status?: number; type?: string; fragmented?: boolean; cancelled?: () => void } = {}

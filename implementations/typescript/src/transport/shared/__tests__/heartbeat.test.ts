@@ -20,6 +20,63 @@ const until = async (holds: () => boolean): Promise<void> => {
 // definition
 
 test.describe('heartbeat', () => {
+  test('waits out a heartbeat when its timer fires before the ping deadline', () => {
+    const heard: string[] = [];
+    const dues: number[] = [];
+    let now = 0;
+    let pending: (() => void) | undefined;
+    const clock = {
+      ...createTestClock(),
+      performance: {
+        now: () => {
+          return now;
+        },
+      },
+      setTimeout: (callback: () => void, due: number) => {
+        dues.push(due);
+        pending = callback;
+        return {};
+      },
+      clearTimeout: () => {
+        pending = undefined;
+      },
+    };
+    const heartbeat = createHeartbeat(
+      100,
+      {
+        ping: () => {
+          heard.push('ping');
+        },
+        drop: () => {
+          heard.push('drop');
+        },
+      },
+      { clock }
+    );
+    const fire = (at: number) => {
+      now = at;
+      const callback = pending;
+      expect(callback).toBeDefined();
+      pending = undefined;
+      callback?.();
+    };
+
+    try {
+      fire(100);
+      expect(heard).toEqual(['ping']);
+      fire(149);
+      expect(heard).toEqual(['ping']);
+      fire(199);
+      expect(heard).toEqual(['ping']);
+      expect(dues).toEqual([100, 100, 51, 1]);
+      fire(200);
+      expect(heard).toEqual(['ping', 'drop']);
+      expect(pending).toBeUndefined();
+    } finally {
+      heartbeat.stop();
+    }
+  });
+
   test('takes a duration a timer holds or never for none, and refuses zero and one past the longest timer', () => {
     expect(assertHeartbeat(20)).toBe(20);
     expect(assertHeartbeat(Infinity)).toBe(Infinity);

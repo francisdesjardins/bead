@@ -62,6 +62,43 @@ const service: IProcedure = {
 };
 const options = { timeout: 1_000 };
 
+test('reports an application error without sending anything', () => {
+  const { sent, transport } = createScriptedTransport();
+  using router = createRouterClient(transport);
+  const reason = new Error('application error');
+  const heard: Error[] = [];
+  router.on('error', (error) => {
+    heard.push(error);
+  });
+
+  router.report(reason);
+
+  expect(heard).toHaveLength(1);
+  expect(heard[0]).toBe(reason);
+  expect(sent).toEqual([]);
+});
+
+test('refuses an empty JWT default credential as a client router is built', () => {
+  const { sent, transport } = createScriptedTransport();
+  expect(() => {
+    return createRouterClient(transport, {
+      credential: { scheme: CredentialScheme.JWT, token: '' },
+    });
+  }).toThrow(new ProgrammerError('a call that presents a JWT gives its token, a string'));
+  expect(sent).toEqual([]);
+});
+
+test('refuses a client router notification before sending anything', async () => {
+  const { sent, transport } = createScriptedTransport();
+  using router = createRouterClient(transport);
+  for (const payload of [new Uint8Array(0), new Error('unwritten')]) {
+    await expect(router.notify(payload, { procedure: service })).rejects.toThrow(
+      new ProgrammerError('only a server notifies; a client hears notifications')
+    );
+  }
+  expect(sent).toEqual([]);
+});
+
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
 
