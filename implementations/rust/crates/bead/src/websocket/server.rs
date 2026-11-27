@@ -54,10 +54,11 @@ use crate::websocket::budget::{MessageBounds, MessageBudget};
 use crate::websocket::connection::Pacing;
 use crate::websocket::connection::{
     CLOSE_TIMEOUT, Commands, Connection, ConnectionBounds, ConnectionHooks, Ended, Failed,
-    GOING_AWAY, MAXIMUM_MESSAGE_BYTES, NORMAL,
+    MAXIMUM_MESSAGE_BYTES,
 };
 use crate::websocket::heartbeat::{Heartbeat, HeartbeatHooks, Reads, hold_heartbeat};
 use crate::websocket::meter::{FrameMeterOptions, Meter, Metering};
+use crate::websocket_frame::{GOING_AWAY, NORMAL_CLOSURE};
 use crate::{
     HEARTBEAT, MAXIMUM_CONNECTIONS, MAXIMUM_CONNECTIONS_PER_ADDRESS, MAXIMUM_UNSENT_BYTES,
 };
@@ -1064,7 +1065,7 @@ impl ServerTransport for WebSocketTransportServer {
             return Box::pin(async { false });
         };
 
-        commands.close(NORMAL);
+        commands.close(NORMAL_CLOSURE);
 
         Box::pin(async move {
             commands.ended().await;

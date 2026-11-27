@@ -43,10 +43,11 @@ use crate::transport::{
 };
 use crate::websocket::connection::{
     CLOSE_TIMEOUT, Commands, Connection, ConnectionBounds, ConnectionHooks, Ended, Failed,
-    GOING_AWAY, MAXIMUM_MESSAGE_BYTES, NORMAL, Wire, config_of, ended_of,
+    MAXIMUM_MESSAGE_BYTES, Wire, config_of, ended_of,
 };
 use crate::websocket::heartbeat::{Heartbeat, HeartbeatHooks, Reads, hold_heartbeat};
 use crate::websocket::meter::{FrameMeterOptions, Meter, Metering};
+use crate::websocket_frame::{GOING_AWAY, NORMAL_CLOSURE};
 
 #[cfg(test)]
 mod tests;
@@ -1160,7 +1161,7 @@ impl WebSocketTransportClient {
                     done,
                 });
                 open.heartbeat.stop();
-                open.commands.close(NORMAL);
+                open.commands.close(NORMAL_CLOSURE);
                 state.current = Some(open);
                 drop(state);
 

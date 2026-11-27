@@ -1,7 +1,8 @@
 //! The house's checks over the Rust side, and over the cases of each verdict: every function's
 //! parameters, every options struct's shape, each library crate's surface against its list and
 //! without a tuple, the tuples of three elements or more its functions take against their pins,
-//! every doc comment's opening, and every member's lints.
+//! every doc comment's opening, every wire format's number in the modules the table of their names
+//! lists, and every member's lints.
 
 use std::collections::BTreeMap;
 use std::fs;
@@ -9,7 +10,7 @@ use std::path::{Path, PathBuf};
 
 use bead_house::{
     Finding, crate_tuples_of, futures_of, members_of, misread_of, options_of, parameters_of,
-    surface_of, tags_of, tuples_of, wide_tuples_of,
+    surface_of, tags_of, tuples_of, wide_tuples_of, wire_literals_of, wire_modules_of,
 };
 
 // ! the tuples of three elements or more the functions of each member take, by its folder, a member
@@ -443,5 +444,71 @@ fn refuses_exactly_the_lines_its_cases_mark() {
         )),
         marked(&wide),
         "the wide tuple cases"
+    );
+}
+
+// the cases of the wire literal rule it marks refused may only grow: a file of fewer is no proof
+// of the rule (decision 0057)
+const WIRE_CASES_FLOOR: usize = 18;
+
+// the modules the table of the wire formats' names lists for the Rust side, each from the
+// repository's root, its holders' and its readers' alike (decision 0057)
+fn wire_modules() -> Result<Vec<PathBuf>, String> {
+    let repository = root().join("../..");
+    let table = read(&repository.join("tools/wire-names.tsv"))?;
+
+    Ok(wire_modules_of(&table)?
+        .iter()
+        .map(|path| repository.join(path))
+        .collect())
+}
+
+#[test]
+fn every_hex_or_binary_literal_of_a_wire_module_stands_in_a_definition() {
+    let modules = wire_modules().expect("the table read");
+
+    assert!(
+        !modules.is_empty(),
+        "the table lists the Rust side's modules"
+    );
+
+    // ! a module the table lists and the tree lacks fails the rule, as a source it cannot parse
+    let refused: Vec<String> = modules
+        .iter()
+        .flat_map(|path| {
+            let file = syn::parse_file(&read(path).unwrap_or_else(|error| panic!("{error}")))
+                .unwrap_or_else(|error| panic!("{} parsed: {error}", path.display()));
+
+            said(path, &wire_literals_of(&file))
+        })
+        .collect();
+
+    assert!(
+        refused.is_empty(),
+        "the wire literal rule refuses:
+{}",
+        refused.join(
+            "
+"
+        )
+    );
+}
+
+#[test]
+fn the_wire_literal_rule_refuses_exactly_what_its_cases_mark() {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("cases/wire.rs");
+    let source = read(&path).expect("the cases read");
+    let file = syn::parse_file(&source).expect("the cases parsed");
+    let marked = marked(&source);
+
+    assert!(
+        marked.len() >= WIRE_CASES_FLOOR,
+        "{} cases marked refused, the floor {WIRE_CASES_FLOOR}",
+        marked.len()
+    );
+    assert_eq!(
+        lines_of(&wire_literals_of(&file)),
+        marked,
+        "each literal the cases mark refused, and none other"
     );
 }

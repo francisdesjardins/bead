@@ -31,45 +31,166 @@ pub const MAXIMUM_PACKET_SIZE: u32 = 16_777_216;
 // a Message Expiry Interval: its identifier and its Four Byte Integer (MQTT 5.0 §3.3.2.3.3)
 const EXPIRY_BYTES: u64 = 5;
 
-// the packets' types, the fixed header's high four bits (MQTT 5.0 §2.1.2)
+/// MQTT 5.0 §2.1.2, Table 2-1: the type of a client's request to connect.
 const CONNECT: u8 = 1;
+
+/// MQTT 5.0 §2.1.2, Table 2-1: the type of a connect's acknowledgement.
 const CONNACK: u8 = 2;
+
+/// MQTT 5.0 §2.1.2, Table 2-1: the type of a message published.
 const PUBLISH: u8 = 3;
+
+/// MQTT 5.0 §2.1.2, Table 2-1: the type of a `QoS` 1 PUBLISH's acknowledgement.
 const PUBACK: u8 = 4;
+
+/// MQTT 5.0 §2.1.2, Table 2-1: the type of a request to subscribe.
 const SUBSCRIBE: u8 = 8;
+
+/// MQTT 5.0 §2.1.2, Table 2-1: the type of a SUBSCRIBE's acknowledgement.
 const SUBACK: u8 = 9;
+
+/// MQTT 5.0 §2.1.2, Table 2-1: the type of a request to unsubscribe.
 const UNSUBSCRIBE: u8 = 10;
+
+/// MQTT 5.0 §2.1.2, Table 2-1: the type of an UNSUBSCRIBE's acknowledgement.
 const UNSUBACK: u8 = 11;
+
+/// MQTT 5.0 §2.1.2, Table 2-1: the type of a PING request.
 const PINGREQ: u8 = 12;
+
+/// MQTT 5.0 §2.1.2, Table 2-1: the type of a PING response.
 const PINGRESP: u8 = 13;
+
+/// MQTT 5.0 §2.1.2, Table 2-1: the type of a disconnect notification.
 const DISCONNECT: u8 = 14;
+
+/// MQTT 5.0 §2.1.2, Table 2-1: the type of an authentication exchange.
 const AUTH: u8 = 15;
 
-// the properties' identifiers (MQTT 5.0 §2.2.2.2)
+/// MQTT 5.0 §2.1.2: the type's position, the fixed header's high four bits.
+const PACKET_TYPE_SHIFT: u32 = 4;
+
+/// MQTT 5.0 §2.1.3: the flags, the fixed header's low four bits.
+const FLAGS_MASK: u8 = 0x0F;
+
+/// MQTT 5.0 §3.3.1.1: a PUBLISH's DUP flag, set on a redelivery.
+const DUP_FLAG: u8 = 0x08;
+
+/// MQTT 5.0 §3.3.1.2: a PUBLISH's `QoS` level, two bits of its flags.
+const QOS_MASK: u8 = 0x06;
+
+/// MQTT 5.0 §3.3.1.2: the `QoS` level's position in a PUBLISH's flags.
+const QOS_SHIFT: u32 = 1;
+
+/// MQTT 5.0 §3.3.1.3: a PUBLISH's RETAIN flag.
+const RETAIN_FLAG: u8 = 0x01;
+
+/// MQTT 5.0 §2.1.3, Table 2-2: the flags a SUBSCRIBE and an UNSUBSCRIBE carry, reserved.
+const RESERVED_SUBSCRIBE_FLAGS: u8 = 0b0010;
+
+/// MQTT 5.0 §3.1.2.2: the Protocol Version a CONNECT names, MQTT 5's.
+const PROTOCOL_VERSION: u8 = 5;
+
+/// MQTT 5.0 §3.1.2.8: a CONNECT's User Name Flag.
+const USER_NAME_FLAG: u8 = 0x80;
+
+/// MQTT 5.0 §3.1.2.9: a CONNECT's Password Flag.
+const PASSWORD_FLAG: u8 = 0x40;
+
+/// MQTT 5.0 §3.1.2.7: a CONNECT's Will Retain bit.
+const WILL_RETAIN_BIT: u8 = 0x20;
+
+/// MQTT 5.0 §3.1.2.6: a CONNECT's Will `QoS`, two bits of its flags.
+const WILL_QOS_MASK: u8 = 0x18;
+
+/// MQTT 5.0 §3.1.2.6: the Will `QoS`'s position in a CONNECT's flags.
+const WILL_QOS_SHIFT: u32 = 3;
+
+/// MQTT 5.0 §3.1.2.5: a CONNECT's Will Flag.
+const WILL_FLAG: u8 = 0x04;
+
+/// MQTT 5.0 §3.1.2.4: a CONNECT's Clean Start bit.
+const CLEAN_START_BIT: u8 = 0x02;
+
+/// MQTT 5.0 §3.2.2.1.1: a CONNACK's Session Present flag, its acknowledge flags' bit 0.
+const SESSION_PRESENT_FLAG: u8 = 0x01;
+
+/// MQTT 5.0 §3.2.2.1: a CONNACK's acknowledge flags' bits 7 to 1, reserved.
+const CONNACK_RESERVED_MASK: u8 = 0xFE;
+
+/// MQTT 5.0 §2.2.2.2, Table 2-4: the identifier of the property Payload Format Indicator.
 const PAYLOAD_FORMAT_INDICATOR: u8 = 0x01;
+
+/// MQTT 5.0 §2.2.2.2, Table 2-4: the identifier of the property Message Expiry Interval.
 const MESSAGE_EXPIRY_INTERVAL: u8 = 0x02;
+
+/// MQTT 5.0 §2.2.2.2, Table 2-4: the identifier of the property Content Type.
 const CONTENT_TYPE: u8 = 0x03;
+
+/// MQTT 5.0 §2.2.2.2, Table 2-4: the identifier of the property Response Topic.
 const RESPONSE_TOPIC: u8 = 0x08;
+
+/// MQTT 5.0 §2.2.2.2, Table 2-4: the identifier of the property Correlation Data.
 const CORRELATION_DATA: u8 = 0x09;
+
+/// MQTT 5.0 §2.2.2.2, Table 2-4: the identifier of the property Subscription Identifier.
 const SUBSCRIPTION_IDENTIFIER: u8 = 0x0B;
+
+/// MQTT 5.0 §2.2.2.2, Table 2-4: the identifier of the property Session Expiry Interval.
 const SESSION_EXPIRY_INTERVAL: u8 = 0x11;
+
+/// MQTT 5.0 §2.2.2.2, Table 2-4: the identifier of the property Assigned Client Identifier.
 const ASSIGNED_CLIENT_IDENTIFIER: u8 = 0x12;
+
+/// MQTT 5.0 §2.2.2.2, Table 2-4: the identifier of the property Server Keep Alive.
 const SERVER_KEEP_ALIVE: u8 = 0x13;
+
+/// MQTT 5.0 §2.2.2.2, Table 2-4: the identifier of the property Authentication Method.
 const AUTHENTICATION_METHOD: u8 = 0x15;
+
+/// MQTT 5.0 §2.2.2.2, Table 2-4: the identifier of the property Authentication Data.
 const AUTHENTICATION_DATA: u8 = 0x16;
+
+/// MQTT 5.0 §2.2.2.2, Table 2-4: the identifier of the property Will Delay Interval.
 const WILL_DELAY_INTERVAL: u8 = 0x18;
+
+/// MQTT 5.0 §2.2.2.2, Table 2-4: the identifier of the property Response Information.
 const RESPONSE_INFORMATION: u8 = 0x1A;
+
+/// MQTT 5.0 §2.2.2.2, Table 2-4: the identifier of the property Server Reference.
 const SERVER_REFERENCE: u8 = 0x1C;
+
+/// MQTT 5.0 §2.2.2.2, Table 2-4: the identifier of the property Reason String.
 const REASON_STRING: u8 = 0x1F;
+
+/// MQTT 5.0 §2.2.2.2, Table 2-4: the identifier of the property Receive Maximum.
 const RECEIVE_MAXIMUM: u8 = 0x21;
+
+/// MQTT 5.0 §2.2.2.2, Table 2-4: the identifier of the property Topic Alias Maximum.
 const TOPIC_ALIAS_MAXIMUM: u8 = 0x22;
+
+/// MQTT 5.0 §2.2.2.2, Table 2-4: the identifier of the property Topic Alias.
 const TOPIC_ALIAS: u8 = 0x23;
+
+/// MQTT 5.0 §2.2.2.2, Table 2-4: the identifier of the property Maximum `QoS`.
 const MAXIMUM_QOS: u8 = 0x24;
+
+/// MQTT 5.0 §2.2.2.2, Table 2-4: the identifier of the property Retain Available.
 const RETAIN_AVAILABLE: u8 = 0x25;
+
+/// MQTT 5.0 §2.2.2.2, Table 2-4: the identifier of the property User Property.
 const USER_PROPERTY: u8 = 0x26;
+
+/// MQTT 5.0 §2.2.2.2, Table 2-4: the identifier of the property Maximum Packet Size.
 const MAXIMUM_PACKET_SIZE_PROPERTY: u8 = 0x27;
+
+/// MQTT 5.0 §2.2.2.2, Table 2-4: the identifier of the property Wildcard Subscription Available.
 const WILDCARD_SUBSCRIPTION_AVAILABLE: u8 = 0x28;
+
+/// MQTT 5.0 §2.2.2.2, Table 2-4: the identifier of the property Subscription Identifiers Available.
 const SUBSCRIPTION_IDENTIFIERS_AVAILABLE: u8 = 0x29;
+
+/// MQTT 5.0 §2.2.2.2, Table 2-4: the identifier of the property Shared Subscription Available.
 const SHARED_SUBSCRIPTION_AVAILABLE: u8 = 0x2A;
 
 // the properties each packet a client reads may carry (MQTT 5.0 §3.2.2.3, §3.3.2.3, §3.4.2.2,
@@ -129,9 +250,39 @@ pub(crate) const UNSUBACK_CODES: [u8; 7] = [0x00, 0x11, 0x80, 0x83, 0x87, 0x8F, 
 // §3.8.3.1; spec 15.27)
 const SUBSCRIPTION_OPTIONS: u8 = 0b0010_0001;
 
-// what a byte of a Variable Byte Integer holds, and the bit that says another follows
-const SEVEN_BITS: u8 = 0x7F;
-const CONTINUES: u8 = 0x80;
+/// MQTT 5.0 §1.5.5: a Variable Byte Integer's digit, the low seven bits of each of its bytes.
+const DIGIT_MASK: u8 = 0x7F;
+
+/// MQTT 5.0 §1.5.5: the continuation bit, a byte's top bit, which says another byte follows.
+const CONTINUATION_BIT: u8 = 0x80;
+
+/// MQTT 5.0 §1.5.5: what each digit of a Variable Byte Integer counts for, the one before it 128
+/// times.
+const DIGIT_RADIX: u32 = 128;
+
+/// MQTT 5.0 §1.5.5: the bytes a Variable Byte Integer takes at most.
+const LONGEST_VARIABLE_BYTE_INTEGER: usize = 4;
+
+/// MQTT 5.0 §2.4: the first Reason Code of a failure; every code under it is a success.
+pub(crate) const FIRST_FAILURE: u8 = 0x80;
+
+/// MQTT 5.0 §2.4, Table 2-6: Success, Normal disconnection, or Granted `QoS` 0.
+pub(crate) const SUCCESS: u8 = 0x00;
+
+/// MQTT 5.0 §2.4, Table 2-6: Granted `QoS` 1.
+pub(crate) const GRANTED_QOS_1: u8 = 0x01;
+
+/// MQTT 5.0 §2.4, Table 2-6: No matching subscribers.
+pub(crate) const NO_MATCHING_SUBSCRIBERS: u8 = 0x10;
+
+/// MQTT 5.0 §2.4, Table 2-6: No subscription existed.
+pub(crate) const NO_SUBSCRIPTION_EXISTED: u8 = 0x11;
+
+/// MQTT 5.0 §2.4, Table 2-6: Session taken over.
+pub(crate) const SESSION_TAKEN_OVER: u8 = 0x8E;
+
+/// MQTT 5.0 §2.4, Table 2-6: Shared Subscriptions not supported.
+pub(crate) const SHARED_SUBSCRIPTIONS_NOT_SUPPORTED: u8 = 0x9E;
 
 /// What a client reads that refuses it: a packet past the bound it set, or one malformed, or one no
 /// client reads (MQTT 5.0 §4.13).
@@ -191,7 +342,7 @@ pub(crate) enum CodeVerdict {
 pub(crate) fn verdict_of((table, code): (&[u8], u8)) -> CodeVerdict {
     if table.contains(&code) {
         CodeVerdict::Named
-    } else if code >= 0x80 {
+    } else if code >= FIRST_FAILURE {
         CodeVerdict::Refusal
     } else {
         CodeVerdict::Unreadable
@@ -433,54 +584,66 @@ pub(crate) fn code_of(code: u8) -> String {
     format!("0x{code:02X}")
 }
 
+// MQTT 5.0 §2.4, Table 2-6: each Reason Code, and what MQTT 5 calls it
+const REASON_NAMES: [(u8, &str); 43] = [
+    (0x00, "Success"),
+    (0x01, "Granted QoS 1"),
+    (0x02, "Granted QoS 2"),
+    (0x04, "Disconnect with Will Message"),
+    (0x10, "No matching subscribers"),
+    (0x11, "No subscription existed"),
+    (0x18, "Continue authentication"),
+    (0x19, "Re-authenticate"),
+    (0x80, "Unspecified error"),
+    (0x81, "Malformed Packet"),
+    (0x82, "Protocol Error"),
+    (0x83, "Implementation specific error"),
+    (0x84, "Unsupported Protocol Version"),
+    (0x85, "Client Identifier not valid"),
+    (0x86, "Bad User Name or Password"),
+    (0x87, "Not authorized"),
+    (0x88, "Server unavailable"),
+    (0x89, "Server busy"),
+    (0x8A, "Banned"),
+    (0x8B, "Server shutting down"),
+    (0x8C, "Bad authentication method"),
+    (0x8D, "Keep Alive timeout"),
+    (0x8E, "Session taken over"),
+    (0x8F, "Topic Filter invalid"),
+    (0x90, "Topic Name invalid"),
+    (0x91, "Packet Identifier in use"),
+    (0x92, "Packet Identifier not found"),
+    (0x93, "Receive Maximum exceeded"),
+    (0x94, "Topic Alias invalid"),
+    (0x95, "Packet too large"),
+    (0x96, "Message rate too high"),
+    (0x97, "Quota exceeded"),
+    (0x98, "Administrative action"),
+    (0x99, "Payload format invalid"),
+    (0x9A, "Retain not supported"),
+    (0x9B, "QoS not supported"),
+    (0x9C, "Use another server"),
+    (0x9D, "Server moved"),
+    (0x9E, "Shared Subscriptions not supported"),
+    (0x9F, "Connection rate exceeded"),
+    (0xA0, "Maximum connect time"),
+    (0xA1, "Subscription Identifiers not supported"),
+    (0xA2, "Wildcard Subscriptions not supported"),
+];
+
 /// What MQTT 5 calls a Reason Code (MQTT 5.0 §2.4).
 pub(crate) const fn reason_name_of(code: u8) -> &'static str {
-    match code {
-        0x00 => "Success",
-        0x01 => "Granted QoS 1",
-        0x02 => "Granted QoS 2",
-        0x04 => "Disconnect with Will Message",
-        0x10 => "No matching subscribers",
-        0x11 => "No subscription existed",
-        0x18 => "Continue authentication",
-        0x19 => "Re-authenticate",
-        0x80 => "Unspecified error",
-        0x81 => "Malformed Packet",
-        0x82 => "Protocol Error",
-        0x83 => "Implementation specific error",
-        0x84 => "Unsupported Protocol Version",
-        0x85 => "Client Identifier not valid",
-        0x86 => "Bad User Name or Password",
-        0x87 => "Not authorized",
-        0x88 => "Server unavailable",
-        0x89 => "Server busy",
-        0x8A => "Banned",
-        0x8B => "Server shutting down",
-        0x8C => "Bad authentication method",
-        0x8D => "Keep Alive timeout",
-        0x8E => "Session taken over",
-        0x8F => "Topic Filter invalid",
-        0x90 => "Topic Name invalid",
-        0x91 => "Packet Identifier in use",
-        0x92 => "Packet Identifier not found",
-        0x93 => "Receive Maximum exceeded",
-        0x94 => "Topic Alias invalid",
-        0x95 => "Packet too large",
-        0x96 => "Message rate too high",
-        0x97 => "Quota exceeded",
-        0x98 => "Administrative action",
-        0x99 => "Payload format invalid",
-        0x9A => "Retain not supported",
-        0x9B => "QoS not supported",
-        0x9C => "Use another server",
-        0x9D => "Server moved",
-        0x9E => "Shared Subscriptions not supported",
-        0x9F => "Connection rate exceeded",
-        0xA0 => "Maximum connect time",
-        0xA1 => "Subscription Identifiers not supported",
-        0xA2 => "Wildcard Subscriptions not supported",
-        _ => "no Reason Code of MQTT 5's",
+    let mut rows: &[(u8, &str)] = &REASON_NAMES;
+
+    while let [(named, name), rest @ ..] = rows {
+        if *named == code {
+            return name;
+        }
+
+        rows = rest;
     }
+
+    "no Reason Code of MQTT 5's"
 }
 
 // ── The reader ───────────────────────────────────────────────────────────────────────────────
@@ -492,8 +655,8 @@ fn variable_of(bytes: &[u8]) -> Result<Option<(u32, usize)>, MqttRefusal> {
     let mut value = 0_u32;
     let mut multiplier = 1_u32;
 
-    for (index, byte) in bytes.iter().take(4).enumerate() {
-        let digit = u32::from(byte & SEVEN_BITS)
+    for (index, byte) in bytes.iter().take(LONGEST_VARIABLE_BYTE_INTEGER).enumerate() {
+        let digit = u32::from(byte & DIGIT_MASK)
             .checked_mul(multiplier)
             .ok_or_else(|| malformed("a Variable Byte Integer past four bytes"))?;
 
@@ -501,7 +664,7 @@ fn variable_of(bytes: &[u8]) -> Result<Option<(u32, usize)>, MqttRefusal> {
             .checked_add(digit)
             .ok_or_else(|| malformed("a Variable Byte Integer past four bytes"))?;
 
-        if byte & CONTINUES == 0 {
+        if byte & CONTINUATION_BIT == 0 {
             if index > 0 && *byte == 0 {
                 return Err(malformed(
                     "a Variable Byte Integer in more bytes than its value needs",
@@ -511,10 +674,10 @@ fn variable_of(bytes: &[u8]) -> Result<Option<(u32, usize)>, MqttRefusal> {
             return Ok(Some((value, index.saturating_add(1))));
         }
 
-        multiplier = multiplier.saturating_mul(128);
+        multiplier = multiplier.saturating_mul(DIGIT_RADIX);
     }
 
-    if bytes.len() >= 4 {
+    if bytes.len() >= LONGEST_VARIABLE_BYTE_INTEGER {
         Err(malformed("a Variable Byte Integer past four bytes"))
     } else {
         Ok(None)
@@ -790,7 +953,7 @@ fn ended(cursor: &Cursor<'_>) -> Result<(), MqttRefusal> {
 fn connack_of(cursor: &mut Cursor<'_>) -> Result<MqttPacket, MqttRefusal> {
     let flags = cursor.byte()?;
 
-    if flags & 0xFE != 0 {
+    if flags & CONNACK_RESERVED_MASK != 0 {
         return Err(malformed("a CONNACK's reserved flags set"));
     }
 
@@ -800,7 +963,7 @@ fn connack_of(cursor: &mut Cursor<'_>) -> Result<MqttPacket, MqttRefusal> {
     ended(cursor)?;
 
     Ok(MqttPacket::Connack(MqttConnack {
-        session_present: flags == 1,
+        session_present: flags & SESSION_PRESENT_FLAG != 0,
         reason_code,
         receive_maximum: properties.receive_maximum,
         maximum_qos: properties.maximum_qos,
@@ -812,9 +975,11 @@ fn connack_of(cursor: &mut Cursor<'_>) -> Result<MqttPacket, MqttRefusal> {
 }
 
 fn publish_of(flags: u8, cursor: &mut Cursor<'_>) -> Result<MqttPacket, MqttRefusal> {
-    let retain = flags & 0b0001 != 0;
-    let dup = flags & 0b1000 != 0;
-    let qos = (flags & 0b0110).checked_shr(1).unwrap_or_default();
+    let retain = flags & RETAIN_FLAG != 0;
+    let dup = flags & DUP_FLAG != 0;
+    let qos = (flags & QOS_MASK)
+        .checked_shr(QOS_SHIFT)
+        .unwrap_or_default();
 
     match qos {
         0 if dup => return Err(malformed("a PUBLISH of QoS 0 marked DUP")),
@@ -938,8 +1103,8 @@ const fn name_of(kind: u8) -> &'static str {
 
 // whether a packet's type is one a client reads, its flags held to what MQTT 5 sets them to
 fn kind_of(first: u8) -> Result<(u8, u8), MqttRefusal> {
-    let kind = first.checked_shr(4).unwrap_or_default();
-    let flags = first & 0x0F;
+    let kind = first.checked_shr(PACKET_TYPE_SHIFT).unwrap_or_default();
+    let flags = first & FLAGS_MASK;
 
     match kind {
         PUBLISH => Ok((kind, flags)),
@@ -1030,9 +1195,9 @@ fn put_variable(out: &mut Vec<u8>, value: u32) {
     let mut rest = value;
 
     loop {
-        let digit = u8::try_from(rest & u32::from(SEVEN_BITS)).unwrap_or_default();
+        let digit = u8::try_from(rest & u32::from(DIGIT_MASK)).unwrap_or_default();
 
-        rest = rest.checked_shr(7).unwrap_or_default();
+        rest = rest.checked_div(DIGIT_RADIX).unwrap_or_default();
 
         if rest == 0 {
             out.push(digit);
@@ -1040,7 +1205,7 @@ fn put_variable(out: &mut Vec<u8>, value: u32) {
             return;
         }
 
-        out.push(digit | CONTINUES);
+        out.push(digit | CONTINUATION_BIT);
     }
 }
 
@@ -1062,13 +1227,32 @@ fn put_text(out: &mut Vec<u8>, (text, name): (&str, &str)) -> Result<(), MqttRef
     put_binary(out, (text.as_bytes(), name))
 }
 
+// the bytes of a packet of a body of `length`, its fixed header the longest it may be: its first
+// byte and its Remaining Length's four
+const fn head_bytes_and(length: usize) -> usize {
+    length
+        .saturating_add(1)
+        .saturating_add(LONGEST_VARIABLE_BYTE_INTEGER)
+}
+
+// QoS 1 as a field of a packet's flags holds it, at `shift` under `mask`: a PUBLISH's, and a
+// will's in a CONNECT's
+fn at_least_once((shift, mask): (u32, u8)) -> u8 {
+    1_u8.checked_shl(shift).unwrap_or_default() & mask
+}
+
+// a packet's first byte: its type, then its flags (MQTT 5.0 §2.1.1)
+fn first_of(kind: u8) -> u8 {
+    kind.checked_shl(PACKET_TYPE_SHIFT).unwrap_or_default()
+}
+
 // a packet of `first` and `body`: its fixed header, its Remaining Length, then its body
 fn packet_of(first: u8, body: &[u8]) -> Result<Vec<u8>, MqttRefusal> {
     let remaining = u32::try_from(body.len())
         .ok()
         .filter(|remaining| *remaining <= LARGEST_REMAINING_LENGTH)
         .ok_or_else(|| malformed("a packet past what MQTT 5 writes"))?;
-    let mut out = Vec::with_capacity(body.len().saturating_add(5));
+    let mut out = Vec::with_capacity(head_bytes_and(body.len()));
 
     out.push(first);
     put_variable(&mut out, remaining);
@@ -1104,23 +1288,24 @@ const RECEIVE_MAXIMUM_OF_ITS_OWN: u16 = 65_535;
 /// A CONNECT's bytes.
 pub(crate) fn write_connect(connect: &Connect) -> Result<Vec<u8>, MqttRefusal> {
     let mut body = Vec::new();
-    let mut flags = 0b0000_0010_u8;
+    let mut flags = CLEAN_START_BIT;
 
     if connect.user_name.is_some() {
-        flags |= 0b1000_0000;
+        flags |= USER_NAME_FLAG;
     }
 
     if connect.password.is_some() {
-        flags |= 0b0100_0000;
+        flags |= PASSWORD_FLAG;
     }
 
     if connect.will.is_some() {
         // a will of QoS 1, RETAIN 0
-        flags |= 0b0000_1100;
+        flags |= WILL_FLAG | at_least_once((WILL_QOS_SHIFT, WILL_QOS_MASK));
+        flags &= !WILL_RETAIN_BIT;
     }
 
     put_text(&mut body, ("MQTT", "a protocol name"))?;
-    body.push(5);
+    body.push(PROTOCOL_VERSION);
     body.push(flags);
     body.extend_from_slice(&connect.keep_alive.to_be_bytes());
 
@@ -1162,7 +1347,7 @@ pub(crate) fn write_connect(connect: &Connect) -> Result<Vec<u8>, MqttRefusal> {
         put_binary(&mut body, (password.as_bytes(), "a Password"))?;
     }
 
-    packet_of(CONNECT.checked_shl(4).unwrap_or_default(), &body)
+    packet_of(first_of(CONNECT), &body)
 }
 
 /// A PUBLISH's bytes: of `QoS` 1 where it names a Packet Identifier, 0 otherwise, its Message Expiry
@@ -1200,25 +1385,23 @@ pub fn write_publish(publish: &MqttPublish) -> Result<Vec<u8>, MqttRefusal> {
         .and_then(|remaining| u32::try_from(remaining).ok())
         .filter(|remaining| *remaining <= LARGEST_REMAINING_LENGTH)
         .ok_or_else(|| malformed("a PUBLISH past what MQTT 5 writes"))?;
-    let mut first = PUBLISH.checked_shl(4).unwrap_or_default();
+    let mut first = first_of(PUBLISH);
 
     if publish.packet_identifier.is_some() {
-        first |= 0b0010;
+        first |= at_least_once((QOS_SHIFT, QOS_MASK));
 
         if publish.dup {
-            first |= 0b1000;
+            first |= DUP_FLAG;
         }
     }
 
     if publish.retain {
-        first |= 0b0001;
+        first |= RETAIN_FLAG;
     }
 
-    let mut out = Vec::with_capacity(
-        head.len()
-            .saturating_add(publish.payload.len())
-            .saturating_add(5),
-    );
+    let mut out = Vec::with_capacity(head_bytes_and(
+        head.len().saturating_add(publish.payload.len()),
+    ));
 
     out.push(first);
     put_variable(&mut out, remaining);
@@ -1233,7 +1416,7 @@ pub fn write_publish(publish: &MqttPublish) -> Result<Vec<u8>, MqttRefusal> {
 pub(crate) fn write_puback(packet_identifier: u16) -> Vec<u8> {
     let [high, low] = packet_identifier.to_be_bytes();
 
-    vec![PUBACK.checked_shl(4).unwrap_or_default(), 2, high, low]
+    vec![first_of(PUBACK), 2, high, low]
 }
 
 /// A SUBSCRIBE of one filter: `QoS` 1, No Local 0, Retain As Published 0, Retain Handling 2 (spec
@@ -1247,7 +1430,7 @@ pub(crate) fn write_subscribe(
     put_text(&mut body, (filter, "a Topic Filter"))?;
     body.push(SUBSCRIPTION_OPTIONS);
 
-    packet_of(SUBSCRIBE.checked_shl(4).unwrap_or_default() | 0b0010, &body)
+    packet_of(first_of(SUBSCRIBE) | RESERVED_SUBSCRIBE_FLAGS, &body)
 }
 
 /// An UNSUBSCRIBE of one filter (spec 15.27): one each, none past its broker's Maximum Packet
@@ -1260,19 +1443,16 @@ pub(crate) fn write_unsubscribe(
     body.push(0);
     put_text(&mut body, (filter, "a Topic Filter"))?;
 
-    packet_of(
-        UNSUBSCRIBE.checked_shl(4).unwrap_or_default() | 0b0010,
-        &body,
-    )
+    packet_of(first_of(UNSUBSCRIBE) | RESERVED_SUBSCRIBE_FLAGS, &body)
 }
 
 /// A PINGREQ.
 pub(crate) fn write_pingreq() -> Vec<u8> {
-    vec![PINGREQ.checked_shl(4).unwrap_or_default(), 0]
+    vec![first_of(PINGREQ), 0]
 }
 
 /// A DISCONNECT of 0x00, a clean end, so that no will goes: its Reason Code left out, as 0x00 is
 /// (MQTT 5.0 §3.14.2.1).
 pub(crate) fn write_disconnect() -> Vec<u8> {
-    vec![DISCONNECT.checked_shl(4).unwrap_or_default(), 0]
+    vec![first_of(DISCONNECT), 0]
 }

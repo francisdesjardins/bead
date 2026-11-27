@@ -35,6 +35,10 @@ use crate::failure::byte_count_of;
 use crate::net::bounds::{SendPace, SendPaceHooks, SendPaceOptions};
 use crate::websocket::budget::{Outside, Partway};
 use crate::websocket::meter::{Meter, MeterVerdict, Verdict};
+use crate::websocket_frame::{
+    ABNORMAL_CLOSURE, GOING_AWAY, INVALID_FRAME_PAYLOAD_DATA, MESSAGE_TOO_BIG, NO_STATUS_RECEIVED,
+    NORMAL_CLOSURE, POLICY_VIOLATION, PROTOCOL_ERROR, TRY_AGAIN_LATER,
+};
 
 #[cfg(test)]
 mod tests;
@@ -46,25 +50,8 @@ pub const CLOSE_TIMEOUT: Duration = Duration::from_secs(5);
 /// The largest message by default: a router's largest envelope by default (spec 15.3).
 pub const MAXIMUM_MESSAGE_BYTES: u64 = 16_778_240;
 
-/// A close's status: the peer's going away, its stop's (RFC 6455 §7.4.1).
-pub(crate) const GOING_AWAY: u16 = 1001;
-
-/// A close's status: its end by its own word.
-pub(crate) const NORMAL: u16 = 1000;
-
-// what a close with no status reads as, and a socket that ended with none (RFC 6455 §7.1.5)
-const NO_STATUS: u16 = 1005;
-const ABNORMAL: u16 = 1006;
-
-// the statuses this side fails a connection with (RFC 6455 §7.4.1)
-const PROTOCOL_ERROR: u16 = 1002;
-
 // the reason tungstenite gives the 1002 it reads a peer's close of a status no end sends as
 const REWRITTEN: &str = "Protocol violation";
-const INVALID_PAYLOAD: u16 = 1007;
-const POLICY_VIOLATION: u16 = 1008;
-const TOO_BIG: u16 = 1009;
-const TRY_AGAIN_LATER: u16 = 1013;
 
 // what a failed connection reads at once of its socket, and drops
 const DRAINED_BYTES: usize = 16_384;
@@ -162,7 +149,7 @@ pub(crate) struct Ended {
 impl Ended {
     /// Whether it closed by its peer's own word: a close of 1000, nothing failing it.
     pub(crate) fn is_clean(&self) -> bool {
-        self.code == NORMAL && !self.is_ended_here
+        self.code == NORMAL_CLOSURE && !self.is_ended_here
     }
 }
 
@@ -822,7 +809,8 @@ impl<S: Wire> Connection<S> {
                     });
                 }
 
-                self.peer_code = Some(frame.map_or(NO_STATUS, |frame| u16::from(frame.code)));
+                self.peer_code =
+                    Some(frame.map_or(NO_STATUS_RECEIVED, |frame| u16::from(frame.code)));
             }
             // * its meter's verdict, which it hands tungstenite as an error of its socket
             Some(Err(WsError::Io(_))) if self.socket.get_ref().verdict().is_some() => {
@@ -840,12 +828,18 @@ impl<S: Wire> Connection<S> {
             Some(Err(WsError::Capacity(
                 CapacityError::MessageTooLong { .. } | CapacityError::TooManyHeaders,
             ))) => {
-                self.fail((TOO_BIG, Failed::TooBig(self.bounds.maximum_message_bytes)));
+                self.fail((
+                    MESSAGE_TOO_BIG,
+                    Failed::TooBig(self.bounds.maximum_message_bytes),
+                ));
             }
             // ! tungstenite raises one `Error::Utf8` for a text message and for a close's reason that
             // is no UTF-8, its close never answered, so both fail with 1007 (RFC 6455 §8.1, §7.4.1)
             Some(Err(error @ WsError::Utf8(_))) => {
-                self.fail((INVALID_PAYLOAD, Failed::InvalidPayload(error.to_string())));
+                self.fail((
+                    INVALID_FRAME_PAYLOAD_DATA,
+                    Failed::InvalidPayload(error.to_string()),
+                ));
             }
             Some(Err(error)) => self.fail((PROTOCOL_ERROR, Failed::Protocol(error.to_string()))),
         }
@@ -874,7 +868,7 @@ impl<S: Wire> Connection<S> {
         self.ended.send_replace(true);
 
         Ended {
-            code: self.peer_code.unwrap_or(ABNORMAL),
+            code: self.peer_code.unwrap_or(ABNORMAL_CLOSURE),
             is_ended_here: self.is_ended_here,
             failure: self.failure,
         }
@@ -921,7 +915,7 @@ fn write_bound_of(maximum_unsent_bytes: u64) -> usize {
 // the status a meter's verdict fails its connection with, and what failed it
 fn failed_of(verdict: Verdict) -> (u16, Failed) {
     match verdict {
-        Verdict::Head(MeterVerdict::TooBig(maximum)) => (TOO_BIG, Failed::TooBig(maximum)),
+        Verdict::Head(MeterVerdict::TooBig(maximum)) => (MESSAGE_TOO_BIG, Failed::TooBig(maximum)),
         Verdict::Head(MeterVerdict::TooManyFrames(maximum)) => {
             (POLICY_VIOLATION, Failed::TooManyFrames(maximum))
         }

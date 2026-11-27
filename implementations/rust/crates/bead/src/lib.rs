@@ -51,6 +51,7 @@ mod transport;
 mod violations;
 #[cfg(feature = "websocket")]
 mod websocket;
+mod websocket_frame;
 
 #[cfg(any(feature = "websocket", feature = "http", feature = "mqtt"))]
 pub use net::tls::TlsOptions;

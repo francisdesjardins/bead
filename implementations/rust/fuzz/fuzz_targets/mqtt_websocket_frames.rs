@@ -13,8 +13,8 @@ use bytes::BytesMut;
 use libfuzzer_sys::fuzz_target;
 
 // the bytes a frame's head takes at most, and a control frame's payload (RFC 6455 §5.2, §5.5)
-const HEAD_BYTES: usize = 14;
-const CONTROL_BYTES: usize = 125;
+const LONGEST_HEAD_BYTES: usize = 14;
+const LONGEST_CONTROL_PAYLOAD: usize = 125;
 
 // what a read gives, a binary message's pieces joined, and the refusal that ended it
 #[derive(Debug, Default, PartialEq, Eq)]
@@ -63,7 +63,8 @@ fn read_of(pieces: &[&[u8]]) -> Read {
         let is_control = buffer.first().is_some_and(|first| first & 0x08 != 0);
 
         assert!(
-            buffer.len() < HEAD_BYTES || (is_control && buffer.len() < HEAD_BYTES + CONTROL_BYTES),
+            buffer.len() < LONGEST_HEAD_BYTES
+                || (is_control && buffer.len() < LONGEST_HEAD_BYTES + LONGEST_CONTROL_PAYLOAD),
             "{} bytes held once it wanted more",
             buffer.len()
         );

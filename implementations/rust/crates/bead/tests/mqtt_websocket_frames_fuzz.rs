@@ -25,8 +25,8 @@ fn inputs() -> usize {
 }
 
 // the bytes a frame's head takes at most, and a control frame's payload (RFC 6455 §5.2, §5.5)
-const HEAD_BYTES: usize = 14;
-const CONTROL_BYTES: usize = 125;
+const LONGEST_HEAD_BYTES: usize = 14;
+const LONGEST_CONTROL_PAYLOAD: usize = 125;
 
 // the frames a server sends a client of MQTT 5 over a WebSocket: a binary frame whole, its CONNACK;
 // one fragmented with a ping between; a pong; a close; a head of a 64-bit length
@@ -103,8 +103,9 @@ fn read_of(pieces: &[&[u8]]) -> Result<Read, String> {
         // and less than its payload
         let is_control = buffer.first().is_some_and(|first| first & 0x08 != 0);
 
-        if buffer.len() >= HEAD_BYTES
-            && !(is_control && buffer.len() < HEAD_BYTES.saturating_add(CONTROL_BYTES))
+        if buffer.len() >= LONGEST_HEAD_BYTES
+            && !(is_control
+                && buffer.len() < LONGEST_HEAD_BYTES.saturating_add(LONGEST_CONTROL_PAYLOAD))
         {
             return Err(format!(
                 "{} bytes held once it wanted more: {}",

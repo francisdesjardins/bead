@@ -27,6 +27,11 @@ use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
 use crate::websocket::budget::{Holding, Outside, Partway};
 use crate::websocket::connection::{MAXIMUM_MESSAGE_BYTES, Wire};
 use crate::websocket::heartbeat::Reads;
+use crate::websocket_frame::{
+    BINARY, CLOSE, CONTINUATION, CONTROL_BIT, EXTENDED_LENGTH_16, EXTENDED_LENGTH_64, FIN_BIT,
+    LENGTH_TOP_BIT, LONGEST_CONTROL_PAYLOAD, LONGEST_HEAD_BYTES, MASK_BIT, MASKING_KEY_BYTES,
+    OPCODE_MASK, PAYLOAD_LENGTH_MASK, PING, PONG, RESERVED_MASK, TEXT,
+};
 
 #[cfg(test)]
 mod tests;
@@ -37,18 +42,6 @@ pub(crate) const PIECE_BYTES: u64 = 65_536;
 
 /// What a frame's head is charged to a server's budget beyond its bytes, once whole (spec 15.12).
 pub(crate) const FRAME_CHARGE: u64 = 128;
-
-// a frame's longest head: 2 bytes, 8 of an extended length, 4 of a mask (RFC 6455 §5.2)
-const HEAD_BYTES: usize = 14;
-
-// the opcodes of RFC 6455 §5.2
-const CONTINUATION: u8 = 0x0;
-const TEXT: u8 = 0x1;
-const BINARY: u8 = 0x2;
-const CLOSE: u8 = 0x8;
-
-// a control frame's longest payload (RFC 6455 §5.5)
-const CONTROL_BYTES: u64 = 125;
 
 /// What a frame meter fails its connection with, and the bound or the rule a head broke.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -90,7 +83,7 @@ impl FrameMeterOptions {
 /// A frame's head as the meter hands it on: 2 to 14 bytes.
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(crate) struct FrameHead {
-    bytes: [u8; HEAD_BYTES],
+    bytes: [u8; LONGEST_HEAD_BYTES],
     length: usize,
 }
 
@@ -106,7 +99,7 @@ impl fmt::Debug for FrameHead {
 impl FrameHead {
     const fn empty() -> Self {
         Self {
-            bytes: [0; HEAD_BYTES],
+            bytes: [0; LONGEST_HEAD_BYTES],
             length: 0,
         }
     }
@@ -189,7 +182,7 @@ struct Frame {
     piece_left: u64,
     // the payload's bytes handed so far, which turn a piece's mask
     offset: u64,
-    key: Option<[u8; 4]>,
+    key: Option<[u8; MASKING_KEY_BYTES]>,
 }
 
 // a message under way: the lengths its frames' heads announced, and its frames
@@ -331,7 +324,7 @@ impl FrameMeter {
         let mut taken = 0_usize;
         let begins = self.head.length == 0
             && input.first().is_some_and(|first| {
-                self.message.is_none() && matches!(first & 0x0F, TEXT | BINARY)
+                self.message.is_none() && matches!(first & OPCODE_MASK, TEXT | BINARY)
             });
 
         if begins || (self.head.length == 0 && self.message.is_some()) {
@@ -372,12 +365,16 @@ impl FrameMeter {
         }
 
         let second = self.head.at(1);
-        let extended = match second & 0x7F {
-            126 => 2,
-            127 => 8,
+        let extended = match second & PAYLOAD_LENGTH_MASK {
+            EXTENDED_LENGTH_16 => 2,
+            EXTENDED_LENGTH_64 => 8,
             _ => 0,
         };
-        let mask = if second & 0x80 == 0 { 0 } else { 4 };
+        let mask = if second & MASK_BIT == 0 {
+            0
+        } else {
+            MASKING_KEY_BYTES
+        };
 
         2_usize.saturating_add(extended).saturating_add(mask)
     }
@@ -388,7 +385,7 @@ impl FrameMeter {
             1 => self.judge_first(self.head.at(0)),
             2 => {
                 let second = self.head.at(1);
-                let is_masked = second & 0x80 != 0;
+                let is_masked = second & MASK_BIT != 0;
 
                 if self.masked && !is_masked {
                     return Some(protocol("an unmasked frame"));
@@ -400,14 +397,18 @@ impl FrameMeter {
 
                 // ! a control frame's length is judged in its 7 bits: a longer form, whatever its
                 // value, breaks RFC 6455 §5.2's minimal form, and every side refuses it alike
-                if self.head.at(0) & 0x08 != 0 && u64::from(second & 0x7F) > CONTROL_BYTES {
+                if self.head.at(0) & CONTROL_BIT != 0
+                    && u64::from(second & PAYLOAD_LENGTH_MASK) > LONGEST_CONTROL_PAYLOAD
+                {
                     return Some(protocol("a control frame longer than 125 bytes"));
                 }
 
                 self.judge_length()
             }
             // ! RFC 6455 §5.2: a 64-bit length's most significant bit is 0
-            3 if self.head.at(1) & 0x7F == 127 && self.head.at(2) & 0x80 != 0 => {
+            3 if self.head.at(1) & PAYLOAD_LENGTH_MASK == EXTENDED_LENGTH_64
+                && self.head.at(2) & LENGTH_TOP_BIT != 0 =>
+            {
                 Some(protocol("a 64-bit length with its top bit set"))
             }
             4 | 10 => self.judge_length(),
@@ -416,19 +417,22 @@ impl FrameMeter {
     }
 
     fn judge_first(&self, first: u8) -> Option<MeterVerdict> {
-        let opcode = first & 0x0F;
-        let is_final = first & 0x80 != 0;
+        let opcode = first & OPCODE_MASK;
+        let is_final = first & FIN_BIT != 0;
 
         // * no extension negotiated (spec 15.2): every reserved bit is 0
-        if first & 0x70 != 0 {
+        if first & RESERVED_MASK != 0 {
             return Some(protocol("a reserved bit set"));
         }
 
         match opcode {
-            3..=7 | 11..=15 => Some(MeterVerdict::Protocol(format!(
-                "a reserved opcode, {opcode}"
-            ))),
-            CLOSE..=10 if !is_final => Some(protocol("a control frame not final")),
+            // * RFC 6455 §5.2: every opcode it does not define is reserved
+            opcode if !matches!(opcode, CONTINUATION | TEXT | BINARY | CLOSE | PING | PONG) => {
+                Some(MeterVerdict::Protocol(format!(
+                    "a reserved opcode, {opcode}"
+                )))
+            }
+            CLOSE..=PONG if !is_final => Some(protocol("a control frame not final")),
             CONTINUATION if self.message.is_none() => {
                 Some(protocol("a continuation with no message under way"))
             }
@@ -451,10 +455,10 @@ impl FrameMeter {
     // the length a data frame's head announces, once it came, its form minimal or not, against its
     // message's bound; a control frame's was judged in its 7 bits
     fn judge_length(&self) -> Option<MeterVerdict> {
-        let opcode = self.head.at(0) & 0x0F;
+        let opcode = self.head.at(0) & OPCODE_MASK;
         let length = announced_of(&self.head)?;
 
-        if opcode & 0x08 != 0 {
+        if opcode & CONTROL_BIT != 0 {
             return None;
         }
 
@@ -474,12 +478,12 @@ impl FrameMeter {
         let head = core::mem::replace(&mut self.head, FrameHead::empty());
         let is_charged = core::mem::take(&mut self.is_charged);
         let first = head.at(0);
-        let opcode = first & 0x0F;
-        let is_data = opcode & 0x08 == 0;
-        let fin = first & 0x80 != 0;
+        let opcode = first & OPCODE_MASK;
+        let is_data = opcode & CONTROL_BIT == 0;
+        let fin = first & FIN_BIT != 0;
         let length = announced_of(&head).unwrap_or(0);
-        let key = (head.at(1) & 0x80 != 0).then(|| {
-            let at = head.length.saturating_sub(4);
+        let key = (head.at(1) & MASK_BIT != 0).then(|| {
+            let at = head.length.saturating_sub(MASKING_KEY_BYTES);
 
             [
                 head.at(at),
@@ -537,9 +541,11 @@ impl FrameMeter {
 
 // the length `head` announces, once its length's bytes came
 fn announced_of(head: &FrameHead) -> Option<u64> {
-    match head.at(1) & 0x7F {
-        126 => (head.length >= 4).then(|| u64::from(u16::from_be_bytes([head.at(2), head.at(3)]))),
-        127 => (head.length >= 10).then(|| {
+    match head.at(1) & PAYLOAD_LENGTH_MASK {
+        EXTENDED_LENGTH_16 => {
+            (head.length >= 4).then(|| u64::from(u16::from_be_bytes([head.at(2), head.at(3)])))
+        }
+        EXTENDED_LENGTH_64 => (head.length >= 10).then(|| {
             let mut length = [0_u8; 8];
 
             for (index, place) in length.iter_mut().enumerate() {
@@ -557,8 +563,12 @@ fn protocol(why: &str) -> MeterVerdict {
 }
 
 // a mask key turned by `offset`, so its piece's payload unmasks as the frame's would there
-fn turned(key: [u8; 4], offset: u64) -> [u8; 4] {
-    let by = usize::try_from(offset.checked_rem(4).unwrap_or(0)).unwrap_or(0);
+fn turned(key: [u8; MASKING_KEY_BYTES], offset: u64) -> [u8; MASKING_KEY_BYTES] {
+    let by = u64::try_from(MASKING_KEY_BYTES)
+        .ok()
+        .and_then(|bytes| offset.checked_rem(bytes))
+        .and_then(|by| usize::try_from(by).ok())
+        .unwrap_or(0);
     let mut turned = key;
 
     turned.rotate_left(by);
@@ -566,24 +576,27 @@ fn turned(key: [u8; 4], offset: u64) -> [u8; 4] {
 }
 
 // a head of its own: `fin` and `opcode`, its length in 7, 16 or 64 bits as it needs, and its key
-fn head_of((fin, opcode): (bool, u8), (length, key): (u64, Option<[u8; 4]>)) -> FrameHead {
+fn head_of(
+    (fin, opcode): (bool, u8),
+    (length, key): (u64, Option<[u8; MASKING_KEY_BYTES]>),
+) -> FrameHead {
     let mut head = FrameHead::empty();
-    let mask = if key.is_some() { 0x80 } else { 0 };
+    let mask = if key.is_some() { MASK_BIT } else { 0 };
 
-    head.push(if fin { 0x80 } else { 0 } | opcode);
+    head.push(if fin { FIN_BIT } else { 0 } | opcode);
 
     if let Ok(short) = u8::try_from(length)
-        && u64::from(short) <= CONTROL_BYTES
+        && u64::from(short) <= LONGEST_CONTROL_PAYLOAD
     {
         head.push(mask | short);
     } else if let Ok(medium) = u16::try_from(length) {
-        head.push(mask | 0x7E);
+        head.push(mask | EXTENDED_LENGTH_16);
 
         for byte in medium.to_be_bytes() {
             head.push(byte);
         }
     } else {
-        head.push(mask | 0x7F);
+        head.push(mask | EXTENDED_LENGTH_64);
 
         for byte in length.to_be_bytes() {
             head.push(byte);

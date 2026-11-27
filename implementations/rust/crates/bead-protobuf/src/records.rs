@@ -26,13 +26,59 @@ use crate::refusal::{NESTED_PAST_100, NOT_ITS_MESSAGE, found};
 #[cfg(test)]
 mod tests;
 
-// the wire types of protobuf's Encoding guide, "Message Structure"
+/// Protocol Buffers Encoding, "Message Structure": the wire type of a varint.
 const VARINT: u32 = 0;
+
+/// Protocol Buffers Encoding, "Message Structure": the wire type of eight bytes, a `fixed64`, a
+/// `sfixed64` or a `double`.
 const I64: u32 = 1;
+
+/// Protocol Buffers Encoding, "Message Structure": the wire type of a length and that many bytes.
 const LEN: u32 = 2;
+
+/// Protocol Buffers Encoding, "Message Structure": the wire type of a group's start.
 const SGROUP: u32 = 3;
+
+/// Protocol Buffers Encoding, "Message Structure": the wire type of a group's end.
 const EGROUP: u32 = 4;
+
+/// Protocol Buffers Encoding, "Message Structure": the wire type of four bytes, a `fixed32`, a
+/// `sfixed32` or a `float`.
 const I32: u32 = 5;
+
+/// Protocol Buffers Encoding, "Message Structure": a tag's wire type, its low three bits, the tag
+/// being `(field_number << 3) | wire_type`.
+const WIRE_TYPE_MASK: u32 = 7;
+
+/// Protocol Buffers Encoding, "Message Structure": a tag's field number's position, past its wire
+/// type.
+const FIELD_NUMBER_SHIFT: u32 = 3;
+
+/// Protocol Buffers Encoding, "Base 128 Varints": the continuation bit, a byte's most significant,
+/// which says another byte follows.
+const CONTINUATION_BIT: u8 = 0x80;
+
+/// Protocol Buffers Encoding, "Base 128 Varints": a byte's payload, its lower 7 bits.
+const DIGIT_MASK: u8 = 0x7F;
+
+/// Protocol Buffers Encoding, "Base 128 Varints": the bits of a varint each byte carries.
+const DIGIT_BITS: u32 = 7;
+
+/// Protocol Buffers Encoding, "Base 128 Varints": the bytes a varint takes at most, between one and
+/// ten.
+const LONGEST_VARINT: u32 = 10;
+
+/// Protocol Buffers Encoding, "Message Structure": the bytes a tag takes at most, a varint within
+/// 32 bits.
+const LONGEST_TAG: u32 = 5;
+
+/// Protocol Buffers Encoding, "Base 128 Varints": the largest tenth byte of a varint within 64
+/// bits, which carries its one last bit.
+const LARGEST_LAST_BYTE_64: u8 = 0x01;
+
+/// Protocol Buffers Encoding, "Base 128 Varints": the largest fifth byte of a tag within 32 bits,
+/// which carries its four last bits.
+const LARGEST_LAST_BYTE_32: u8 = 0x0F;
 
 /// How deep a message nests below the top one, a group and a map's entry each a message (spec
 /// 17.9.3).
@@ -514,9 +560,9 @@ fn length_into(output: &mut Vec<u8>, length: usize) {
     let mut value = u64::try_from(length).unwrap_or(u64::MAX);
 
     loop {
-        let low = u8::try_from(value & 0x7F).unwrap_or_default();
+        let low = u8::try_from(value & u64::from(DIGIT_MASK)).unwrap_or_default();
 
-        value >>= 7;
+        value >>= DIGIT_BITS;
 
         if value == 0 {
             output.push(low);
@@ -524,7 +570,7 @@ fn length_into(output: &mut Vec<u8>, length: usize) {
             return;
         }
 
-        output.push(low | 0x80);
+        output.push(low | CONTINUATION_BIT);
     }
 }
 
@@ -658,8 +704,8 @@ impl<'a> Reader<'a> {
     fn message(&mut self, within: Option<Holds>, frame: Frame) -> Result<(), CodecRefusal> {
         while self.at < frame.end {
             let tag = self.tag(frame.end)?;
-            let number = tag >> 3;
-            let wire = tag & 7;
+            let number = tag >> FIELD_NUMBER_SHIFT;
+            let wire = tag & WIRE_TYPE_MASK;
 
             if number == 0 {
                 return Err(refused("field number 0"));
@@ -718,7 +764,7 @@ impl<'a> Reader<'a> {
         field: Option<FieldShape>,
         (tag, frame): (u32, Frame),
     ) -> Result<(), CodecRefusal> {
-        match tag & 7 {
+        match tag & WIRE_TYPE_MASK {
             VARINT => {
                 let value = self.varint(frame.end)?;
 
@@ -761,7 +807,7 @@ impl<'a> Reader<'a> {
                 Frame {
                     end: frame.end,
                     depth: frame.deeper()?,
-                    group: tag >> 3,
+                    group: tag >> FIELD_NUMBER_SHIFT,
                 },
             ),
             wire => Err(refused(&format!("the wire type {wire}"))),
@@ -780,10 +826,10 @@ impl<'a> Reader<'a> {
             let start = self.at;
             let tag = self.tag(end)?;
             let after_tag = self.at;
-            let field = self.field_of(within, tag >> 3);
+            let field = self.field_of(within, tag >> FIELD_NUMBER_SHIFT);
 
-            match tag & 7 {
-                EGROUP if tag >> 3 == group => {
+            match tag & WIRE_TYPE_MASK {
+                EGROUP if tag >> FIELD_NUMBER_SHIFT == group => {
                     output.extend_from_slice(self.span(start));
 
                     return Ok(());
@@ -820,7 +866,7 @@ impl<'a> Reader<'a> {
                     output.extend_from_slice(self.span(start));
                     self.rewrite(
                         field.and_then(|field| field.holds),
-                        ((end, tag >> 3), output),
+                        ((end, tag >> FIELD_NUMBER_SHIFT), output),
                     )?;
 
                     continue;
@@ -900,17 +946,18 @@ impl<'a> Reader<'a> {
     fn varint(&mut self, end: usize) -> Result<u64, CodecRefusal> {
         let mut value = 0_u64;
 
-        for shift in (0..10_u32).map(|place| place.saturating_mul(7)) {
+        for place in 0..LONGEST_VARINT {
             let byte = self
                 .next(end)
                 .ok_or_else(|| refused("a varint cut short, or past the end of its message"))?;
+            let shift = place.saturating_mul(DIGIT_BITS);
 
-            value |= u64::from(byte & 0x7F).checked_shl(shift).unwrap_or(0);
+            value |= u64::from(byte & DIGIT_MASK).checked_shl(shift).unwrap_or(0);
 
-            if byte & 0x80 == 0 {
+            if byte & CONTINUATION_BIT == 0 {
                 // ! a 10th byte past 0x01 sets a bit past the 64th: no unsigned 64-bit integer, so no
                 // encoding, refused here before Buffa reads
-                if shift == 63 && byte > 0x01 {
+                if place == LONGEST_VARINT - 1 && byte > LARGEST_LAST_BYTE_64 {
                     return Err(refused("a varint past 64 bits"));
                 }
 
@@ -925,18 +972,19 @@ impl<'a> Reader<'a> {
     fn tag(&mut self, end: usize) -> Result<u32, CodecRefusal> {
         let mut value = 0_u32;
 
-        for shift in (0..5_u32).map(|place| place.saturating_mul(7)) {
+        for place in 0..LONGEST_TAG {
             let byte = self
                 .next(end)
                 .ok_or_else(|| refused("a tag cut short, or past the end of its message"))?;
+            let shift = place.saturating_mul(DIGIT_BITS);
 
-            if shift == 28 && byte > 0x0F {
+            if place == LONGEST_TAG - 1 && byte > LARGEST_LAST_BYTE_32 {
                 return Err(refused("a tag of more than 5 bytes, or past 32 bits"));
             }
 
-            value |= u32::from(byte & 0x7F).checked_shl(shift).unwrap_or(0);
+            value |= u32::from(byte & DIGIT_MASK).checked_shl(shift).unwrap_or(0);
 
-            if byte & 0x80 == 0 {
+            if byte & CONTINUATION_BIT == 0 {
                 return Ok(value);
             }
         }
