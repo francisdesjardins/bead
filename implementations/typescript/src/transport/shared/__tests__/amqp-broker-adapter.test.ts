@@ -12,7 +12,13 @@ import { type AddressInfo, createServer } from 'node:net';
 import { join } from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { expect, test } from '@playwright/test';
-import rhea, { type Connection, type Delivery, type Receiver, type Sender } from 'rhea';
+import rhea, {
+  type Connection,
+  type Delivery,
+  type EventContext,
+  type Receiver,
+  type Sender,
+} from 'rhea';
 import { createBrokerTransportServer } from '../../server/broker-transport-server';
 import { createLinkRelay, type ILinkRelay } from '../../server/__tests__/link-relay';
 import { TLS_FIXTURE } from '../../server/__tests__/tls-fixture';
@@ -1116,6 +1122,7 @@ test.describe('createAmqpBrokerAdapter', () => {
         return creditOf(attach.link as Sender);
       })
     ).toEqual([0]);
+    expect(last.pastEnd).toEqual([]);
     last.releaseEnds();
     await sleep(100);
     expect([downs.length, adapter.isLinked]).toEqual([2, true]);
@@ -1159,11 +1166,11 @@ test.describe('createAmqpBrokerAdapter', () => {
     await adapter.stop();
   });
 
-  test('holds one receiver of a name subscribed again after an unsubscription met it as it attached again, the one let go given no credit, whether or not its ATTACH is answered (spec 15.34)', async () => {
+  test('holds one receiver of a name subscribed again after an unsubscription met it as it attached again, the one let go given no credit, whether its ATTACH is answered before that subscription, after it or never (spec 15.33)', async () => {
     const adapter = adapterOf(script);
     const { downs } = heardOf(adapter);
 
-    for (const isAnswered of [true, false]) {
+    for (const answered of ['before', 'after', 'never'] as const) {
       script.policy.attach = () => {
         return 'take';
       };
@@ -1194,7 +1201,7 @@ test.describe('createAmqpBrokerAdapter', () => {
         return session === reattaching ? 'hold' : 'answer';
       };
 
-      // * let go, then subscribed anew, as it attaches again
+      // * let go as it attaches again: its session ended at once, before its ATTACH is answered
       await adapter.unsubscribe(NAME);
       await link.until(() => {
         return link.endsHeld.includes(reattaching as never);
@@ -1202,21 +1209,25 @@ test.describe('createAmqpBrokerAdapter', () => {
 
       const attached = link.attaches.length;
 
-      if (isAnswered) {
-        script.policy.attach = () => {
-          return 'take';
-        };
-        link.releaseAttaches();
-      }
-
       script.policy.attach = () => {
         return 'take';
       };
+
+      if (answered === 'before') {
+        link.releaseAttaches();
+        await sleep(100);
+      }
+
+      // * then subscribed anew: a receiver of its own, on a session of its own, credited
       await adapter.subscribe(NAME);
+
+      if (answered === 'after') {
+        link.releaseAttaches();
+      }
+
       await sleep(100);
 
-      // * its ATTACH answered late, or never: the receiver let go is given no credit, and its
-      // session ends; the one subscribed anew alone holds the name
+      // * the receiver let go is given no credit, and nothing goes on its session past its END
       const credits = link.attaches
         .slice(attached)
         .filter((attach) => {
@@ -1227,13 +1238,19 @@ test.describe('createAmqpBrokerAdapter', () => {
         });
 
       expect(credits).toEqual(
-        isAnswered
-          ? [
-              [true, 0],
-              [false, 1],
-            ]
-          : [[false, 1]]
+        {
+          after: [
+            [false, 1],
+            [true, 0],
+          ],
+          before: [
+            [true, 0],
+            [false, 1],
+          ],
+          never: [[false, 1]],
+        }[answered]
       );
+      expect(link.pastEnd).toEqual([]);
       link.releaseEnds();
       await sleep(100);
 
@@ -1246,9 +1263,294 @@ test.describe('createAmqpBrokerAdapter', () => {
           return attach.session === reattaching;
         })
       ).toEqual([false]);
-      expect([downs.length, adapter.isLinked]).toEqual([0, true]);
+      expect([downs.length, adapter.isLinked, link.pastEnd]).toEqual([0, true, []]);
       await adapter.stop();
     }
+  });
+
+  test('holds a name its broker ended as it first attached by its reattachment alone, so that an unsubscription as it attaches again ends that session and a later subscription attaches anew (spec 15.33)', async () => {
+    const adapter = adapterOf(script);
+    const { downs } = heardOf(adapter);
+    const link = await inboxUp({ adapter, script });
+
+    script.policy.attach = ({ address }) => {
+      return address === NAME_QUEUE ? 'hold' : 'take';
+    };
+
+    // * its broker ends its first receiver as it answers its ATTACH: subscribed, and attached again
+    const begun = link.sessions.length;
+    const subscribing = adapter.subscribe(NAME);
+
+    await link.until(() => {
+      return link.sessions.length === begun + 1;
+    });
+    await sleep(50);
+    link.releaseAttaches();
+    attachesOf(link, { address: NAME_QUEUE, role: 'receiver' })
+      .at(-1)
+      ?.link.close({ condition: 'amqp:resource-deleted' });
+    await subscribing;
+    await link.until(() => {
+      return link.sessions.length === begun + 2;
+    });
+
+    const reattaching = link.sessions.at(-1);
+
+    script.policy.end = (session) => {
+      return session === reattaching ? 'hold' : 'answer';
+    };
+
+    // * let go as it attaches again: that session ended at once, before its ATTACH is answered
+    await adapter.unsubscribe(NAME);
+    await link.until(() => {
+      return link.endsHeld.includes(reattaching as never);
+    });
+
+    const attached = link.attaches.length;
+
+    link.releaseAttaches();
+    await sleep(100);
+    expect(
+      link.attaches.slice(attached).map((attach) => {
+        return creditOf(attach.link as Sender);
+      })
+    ).toEqual([0]);
+    expect(link.pastEnd).toEqual([]);
+    link.releaseEnds();
+
+    // * subscribed later: attached anew, and credited
+    script.policy.attach = () => {
+      return 'take';
+    };
+
+    const anew = link.attaches.length;
+
+    await adapter.subscribe(NAME);
+    await sleep(100);
+    expect(
+      link.attaches.slice(anew).map((attach) => {
+        return [attach.address, creditOf(attach.link as Sender)];
+      })
+    ).toEqual([[NAME_QUEUE, 1]]);
+    expect([downs.length, adapter.isLinked, link.pastEnd]).toEqual([0, true, []]);
+    await adapter.stop();
+  });
+
+  test('lets a name attached again go once what it handed on was settled, its DETACH after its DISPOSITION, held from before its credit went (spec 15.33, 15.34)', async () => {
+    const adapter = adapterOf(script);
+    const { downs, messages } = heardOf(adapter);
+    const link = await inboxUp({ adapter, script });
+
+    await adapter.subscribe(NAME);
+
+    // its broker ends the name's receiver: attached again, credited, and a message handed on
+    attachesOf(link, { address: NAME_QUEUE, role: 'receiver' })[0]?.link.close({
+      condition: 'amqp:resource-deleted',
+    });
+    await link.until(() => {
+      return attachesOf(link, { address: NAME_QUEUE, role: 'receiver' }).length === 2;
+    });
+
+    const again = attachesOf(link, { address: NAME_QUEUE, role: 'receiver' })[1] as IScriptedAttach;
+    const sender = again.link as Sender;
+
+    await until(() => {
+      return sender.sendable();
+    });
+
+    const delivery = sender.send(dataOf(Uint8Array.of(1)));
+    let outcomeAtDetach: string | undefined;
+
+    link.connection.on('sender_close', (closing: EventContext) => {
+      if (closing.sender === sender) {
+        outcomeAtDetach = outcomeOf(delivery);
+      }
+    });
+    await until(() => {
+      return messages.length === 1;
+    });
+
+    // * let go before what it handed on is settled: no DETACH until its DISPOSITION went
+    let isLetGo = false;
+    const unsubscribing = adapter.unsubscribe(NAME).then(() => {
+      isLetGo = true;
+    });
+
+    await sleep(100);
+    expect([isLetGo, link.detached.includes(again), link.ended.includes(again.session)]).toEqual([
+      false,
+      false,
+      false,
+    ]);
+    messages[0]?.settle();
+    await unsubscribing;
+    expect([outcomeAtDetach, link.detached.includes(again)]).toEqual(['accepted', true]);
+    expect([downs.length, adapter.isLinked]).toEqual([0, true]);
+    await adapter.stop();
+  });
+
+  test('stops while a name attaches again by ending that session at once, its receiver given no credit, and attaches no name its broker ends during its stop (spec 15.33)', async () => {
+    const adapter = adapterOf(script);
+    const { downs } = heardOf(adapter);
+    const link = await inboxUp({ adapter, script });
+
+    await adapter.subscribe(NAME);
+
+    // its broker ends the name's receiver: attached again, its ATTACH held, and the deletion of
+    // its inbox that its stop asks held too
+    script.policy.attach = ({ address }) => {
+      return address === NAME_QUEUE ? 'hold' : 'take';
+    };
+    script.policy.answer = () => {
+      return 'hold';
+    };
+
+    const begun = link.sessions.length;
+
+    attachesOf(link, { address: NAME_QUEUE, role: 'receiver' })[0]?.link.close({
+      condition: 'amqp:resource-deleted',
+    });
+    await link.until(() => {
+      return link.sessions.length === begun + 1;
+    });
+
+    const reattaching = link.sessions.at(-1);
+
+    script.policy.end = (session) => {
+      return session === reattaching ? 'hold' : 'answer';
+    };
+
+    const stopping = adapter.stop();
+
+    await link.until(() => {
+      return link.requests.some(({ method }) => {
+        return method === 'DELETE';
+      });
+    });
+
+    // * its ATTACH answered as its stop deletes its inbox: its session ended, never credited
+    const attached = link.attaches.length;
+
+    link.releaseAttaches();
+    await sleep(100);
+    expect(
+      link.attaches.slice(attached).map((attach) => {
+        return creditOf(attach.link as Sender);
+      })
+    ).toEqual([0]);
+    expect([link.endsHeld.includes(reattaching as never), link.pastEnd]).toEqual([true, []]);
+    link.releaseEnds();
+    link.requests
+      .find(({ method }) => {
+        return method === 'DELETE';
+      })
+      ?.answer(200);
+    await stopping;
+    expect([downs, adapter.isLinked]).toEqual([[], false]);
+
+    // * a name its broker ends as its stop sends what it was handed is never attached again
+    script.policy.attach = () => {
+      return 'take';
+    };
+    script.policy.answer = ({ method }) => {
+      return method === 'PUT' ? 201 : method === 'POST' ? 204 : 200;
+    };
+    script.policy.end = () => {
+      return 'answer';
+    };
+
+    const next = await inboxUp({ adapter, script });
+
+    await adapter.subscribe(NAME);
+    script.policy.settle = () => {
+      return 'hold';
+    };
+
+    const publishing = settledOf(adapter.publish({ payload: Uint8Array.of(1), topic: INBOX }));
+
+    await next.until(() => {
+      return next.deliveries.length === 1;
+    });
+
+    const stoppingNext = adapter.stop();
+    const sessions = next.sessions.length;
+
+    attachesOf(next, { address: NAME_QUEUE, role: 'receiver' })[0]?.link.close({
+      condition: 'amqp:resource-deleted',
+    });
+    await sleep(100);
+    expect(next.sessions.length).toBe(sessions);
+    script.policy.settle = () => {
+      return 'accepted';
+    };
+    next.deliveries[0]?.delivery.accept();
+    await stoppingNext;
+    await publishing;
+    expect([downs, adapter.isLinked]).toEqual([[], false]);
+  });
+
+  test('attaches a name again within one connectTimeout, past which its link is lost (spec 15.33, 15.37)', async () => {
+    const adapter = adapterOf(script, { connectTimeout: 400 });
+    const { downs } = heardOf(adapter);
+
+    // * its ATTACH answered within it: held and credited, its link kept
+    const within = await inboxUp({ adapter, script });
+
+    await adapter.subscribe(NAME);
+    script.policy.attach = ({ address }) => {
+      return address === NAME_QUEUE ? 'hold' : 'take';
+    };
+
+    const opened = within.sessions.length;
+
+    attachesOf(within, { address: NAME_QUEUE, role: 'receiver' })[0]?.link.close({
+      condition: 'amqp:resource-deleted',
+    });
+    await within.until(() => {
+      return within.sessions.length === opened + 1;
+    });
+    await sleep(200);
+
+    const taken = within.attaches.length;
+
+    within.releaseAttaches();
+    await sleep(400);
+    expect(
+      within.attaches.slice(taken).map((attach) => {
+        return creditOf(attach.link as Sender);
+      })
+    ).toEqual([1]);
+    expect([downs, adapter.isLinked]).toEqual([[], true]);
+    script.policy.attach = () => {
+      return 'take';
+    };
+    await adapter.stop();
+
+    // * not answered within it: its link lost
+    const past = await inboxUp({ adapter, script });
+
+    await adapter.subscribe(NAME);
+    script.policy.attach = ({ address }) => {
+      return address === NAME_QUEUE ? 'hold' : 'take';
+    };
+
+    const begun = past.sessions.length;
+
+    attachesOf(past, { address: NAME_QUEUE, role: 'receiver' })[0]?.link.close({
+      condition: 'amqp:resource-deleted',
+    });
+    await past.until(() => {
+      return past.sessions.length === begun + 1;
+    });
+    await sleep(200);
+    expect([downs, adapter.isLinked]).toEqual([[], true]);
+    await until(() => {
+      return downs.length > 0;
+    });
+    expect([downs.length, adapter.isLinked]).toEqual([1, false]);
+    script.policy.attach = () => {
+      return 'take';
+    };
   });
 
   test('refuses each publication a sending session held as it ends, keeps its link, and begins another for the next (spec 15.33)', async () => {
@@ -1707,7 +2009,7 @@ test.describe('createAmqpBrokerAdapter', () => {
     expect([downs.length, adapter.isLinked]).toEqual([3, false]);
   });
 
-  test('waits, subscribing a name under way, for its ATTACH to name its source, and lets a name whose subscription an unsubscription met go once it attached, never held (spec 15.34)', async () => {
+  test('waits, subscribing a name under way, for its ATTACH to name its source, and lets a name whose subscription an unsubscription met go once it attached, given no credit and never held (spec 15.34)', async () => {
     const adapter = adapterOf(script);
     const { downs, messages } = heardOf(adapter);
     const link = await inboxUp({ adapter, script });
@@ -1739,8 +2041,8 @@ test.describe('createAmqpBrokerAdapter', () => {
     ]);
     await adapter.unsubscribe(NAME);
 
-    // * an unsubscription meets one under way: it is let go once attached, and never held, what its
-    // broker hands on before it answered its DETACH not handed on
+    // * an unsubscription meets one under way: it is let go once attached, given no credit, so that
+    // its broker sends it nothing before its DETACH, and never held
     script.policy.detach = ({ address }) => {
       return address === NAME_QUEUE ? 'hold' : 'answer';
     };
@@ -1760,17 +2062,16 @@ test.describe('createAmqpBrokerAdapter', () => {
     link.releaseAttaches();
 
     const met = attachesOf(link, { address: NAME_QUEUE, role: 'receiver' })[1] as IScriptedAttach;
-    const metSender = met.link as Sender;
 
-    await until(() => {
-      return metSender.sendable();
-    });
-    metSender.send(dataOf(Uint8Array.of(1)));
     await link.until(() => {
       return link.detached.includes(met);
     });
     await sleep(100);
-    expect([held, messages]).toEqual([['subscribed 1', 'subscribed 2'], []]);
+    expect([held, messages, creditOf(met.link as Sender)]).toEqual([
+      ['subscribed 1', 'subscribed 2'],
+      [],
+      0,
+    ]);
     link.releaseDetaches();
     await Promise.all([subscribed, unsubscribing]);
     expect([held.at(-1), messages]).toEqual(['let go', []]);

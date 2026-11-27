@@ -66,7 +66,7 @@ export interface IAmqpScriptPolicy {
   credit: number;
   /** A DETACH of the adapter's answered, or held unanswered until a test releases it. */
   detach: (attach: Pick<IScriptedAttach, 'address' | 'role'>) => 'answer' | 'hold';
-  /** An END of the adapter's answered, or held unanswered until a test releases it. */
+  /** An END of the adapter's answered, or its answer held until a test releases it. */
   end: (session: Session) => 'answer' | 'hold';
   /** The max-message-size the script's ATTACH names to each of the adapter's senders. */
   maximumMessageSize: number | undefined;
@@ -89,12 +89,14 @@ export interface IAmqpScriptedLink {
   readonly detached: IScriptedAttach[];
   /** The sessions the adapter ended, in their order. */
   readonly ended: Session[];
-  /** The sessions whose END the policy holds, in their order, what the adapter sends on them still read. */
+  /** The sessions whose END's answer the policy holds, in their order. */
   readonly endsHeld: Session[];
   /** Whether the adapter's end of it closed. */
   readonly isClosed: boolean;
   /** The adapter's OPEN. */
   readonly open: Record<string, unknown>;
+  /** Each frame the adapter sent on a channel past its END, refused as it was read, its connection then ended (AMQP 1.0 §2.5.5). */
+  readonly pastEnd: { readonly channel: number; readonly performative: string }[];
   /** What SASL PLAIN carried, where the adapter authenticated by it. */
   readonly plain: { password: string; username: string } | undefined;
   /** Every management request, in its order. */
@@ -116,7 +118,7 @@ export interface IAmqpScriptedLink {
   releaseAttaches(): void;
   /** Answers each DETACH the policy held, in its order. */
   releaseDetaches(): void;
-  /** Answers each END the policy held, in its order. */
+  /** Answers each END whose answer the policy held, in its order. */
   releaseEnds(): void;
   /** Holds until `isDone`, within `within` ms; refuses past it. */
   until(isDone: () => boolean, options?: { within?: number | undefined }): Promise<void>;
@@ -247,6 +249,9 @@ export const createAmqpScript = async (options?: {
     const heldDetaches: (() => void)[] = [];
     const endsHeld: Session[] = [];
     const heldEnds: (() => void)[] = [];
+    const pastEnd: { channel: number; performative: string }[] = [];
+    // the channels the adapter's END came on, until a BEGIN opens one anew
+    const endedByAdapter = new Set<number>();
     let isClosed = false;
     let closeFrame: { error?: unknown } | undefined;
     const socket = (connection as unknown as { socket: Socket }).socket;
@@ -266,31 +271,68 @@ export const createAmqpScript = async (options?: {
     connections.add(connection);
 
     // ! a frame on a channel the adapter ended is refused in whatever read it comes (AMQP 1.0
-    // §2.5.5), where rhea maps that channel a turn longer
-    const mapped = connection as unknown as {
-      on_end: (frame: { channel: number }) => void;
-      remote_channel_map: Record<number, unknown>;
-    };
-    const onEnd = mapped.on_end;
+    // §2.5.5), where rhea maps that channel a turn longer: the channel unmapped as its END is
+    // read, each frame past it recorded, and rhea's refusal of it ends the connection
+    const mapped = connection as unknown as Record<
+      string,
+      (frame: { channel: number; performative?: unknown }) => void
+    > & { remote_channel_map: Record<number, unknown> };
+    const onBegin = mapped['on_begin'] as (frame: { channel: number }) => void;
 
-    mapped.on_end = (frame) => {
-      const answer = (): void => {
-        onEnd.call(connection, frame);
-        // oxlint-disable-next-line typescript/no-dynamic-delete -- rhea's own map, by channel
-        delete mapped.remote_channel_map[frame.channel];
+    mapped['on_begin'] = (frame) => {
+      endedByAdapter.delete(frame.channel);
+      onBegin.call(connection, frame);
+    };
+
+    for (const performative of ['attach', 'detach', 'disposition', 'flow', 'transfer']) {
+      const delegated = mapped[`on_${performative}`] as (frame: { channel: number }) => void;
+
+      mapped[`on_${performative}`] = (frame) => {
+        if (endedByAdapter.has(frame.channel)) {
+          pastEnd.push({ channel: frame.channel, performative });
+        }
+
+        delegated.call(connection, frame);
       };
+    }
+
+    const onEnd = mapped['on_end'] as (frame: { channel: number }) => void;
+
+    mapped['on_end'] = (frame) => {
       const session = mapped.remote_channel_map[frame.channel] as Session | undefined;
 
-      // * an END the policy holds is answered once a test releases it, its channel still read
-      if (session !== undefined && policy.end(session) === 'hold') {
-        endsHeld.push(session);
-        heldEnds.push(answer);
+      if (endedByAdapter.has(frame.channel)) {
+        pastEnd.push({ channel: frame.channel, performative: 'end' });
+      }
+
+      if (session === undefined) {
+        onEnd.call(connection, frame);
 
         return;
       }
 
-      answer();
+      const ended = session as unknown as { on_end: (frame: unknown) => void };
+
+      endedByAdapter.add(frame.channel);
+      // oxlint-disable-next-line typescript/no-dynamic-delete -- rhea's own map, by channel
+      delete mapped.remote_channel_map[frame.channel];
+
+      // * an END whose answer the policy holds is answered once a test releases it: its session
+      // still sends, a held ATTACH's answer among it
+      if (policy.end(session) === 'hold') {
+        endsHeld.push(session);
+        heldEnds.push(() => {
+          ended.on_end.call(session, frame);
+        });
+
+        return;
+      }
+
+      ended.on_end.call(session, frame);
     };
+    connection.on('protocol_error', () => {
+      // * a frame past an END, recorded: its connection ends
+    });
 
     // the script's sender paired with the management receiver of the session, which answers
     const answerer = new WeakMap<Session, Sender>();
@@ -549,6 +591,7 @@ export const createAmqpScript = async (options?: {
         return isClosed;
       },
       open: (connection as unknown as { remote: { open: Record<string, unknown> } }).remote.open,
+      pastEnd,
       get plain() {
         return plains.get(connection);
       },
