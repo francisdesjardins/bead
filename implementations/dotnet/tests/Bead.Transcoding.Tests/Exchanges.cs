@@ -165,13 +165,14 @@ internal static partial class Exchanges
                     var socket = new Socket(SocketType.Stream, ProtocolType.Tcp) { NoDelay = true };
 
                     await socket.ConnectAsync(Host, address.Port);
-                    // * each character of a head is one octet (transcoding.json's exchanges)
-                    await socket.SendAsync(Encoding.Latin1.GetBytes(head));
+                    // ! a send writes its head and body together, as the other players do: HTTP
+                    // can refuse the head and close before a second write, whose reset erases the
+                    // unread refusal (RFC 9112 §9.6). Each head character is one octet.
+                    byte[] octets = [.. Encoding.Latin1.GetBytes(head), .. StringOf(send, "body") is { } body ? Hex(body) : []];
 
-                    if (StringOf(send, "body") is { } body)
-                    {
-                        await socket.SendAsync(Hex(body));
-                    }
+                    using var output = new NetworkStream(socket, ownsSocket: false);
+
+                    await output.WriteAsync(octets);
 
                     sockets[on] = new Opened(socket);
                     sockets[on].Methods.Enqueue(head.Split(' ')[0]);
