@@ -1,0 +1,177 @@
+# Each number a wire format's standard defines, one row a concept, and the constant that names it
+# on each side: tools/check-wire-names.mjs holds each name to its module and its value, and each
+# side's lint holds the modules its column names to the notation rule (decision 0057).
+# A row is tab-separated: the format, the concept in the standard's words, the standard and its
+# section, the value, then the TypeScript, C# and Rust cells. A value is an integer literal, hex,
+# binary or decimal, `_` allowed, or `-: ` and why the row holds no one value. A cell is `-: ` and
+# why the side reads no such number, or the path from the repository's root of the module that
+# holds the name, then, after `, `, that of each other package that holds it too. A path then `#`
+# gives the name as its module writes it, where it stands in a holder (`Holder.Member`) or its
+# spelling differs from the concept's; with no `#`, the name is the concept, in PascalCase on the
+# C# side. A row whose concept is `@reads` lists in each cell, by `, `, the modules that read its
+# format's names beside those that hold them, or `-: ` and why none; its value is `-`. A cell that
+# opens with `-` is a reason whole, never split on `, ` nor read for a path.
+# format	concept	standard	value	typescript	csharp	rust
+websocket	CONTINUATION	RFC 6455 §5.2	0x0	implementations/typescript/src/transport/shared/websocket-frame.ts	implementations/dotnet/src/Bead.Transport.WebSockets/WebSocketFrame.cs	implementations/rust/crates/bead/src/websocket_frame.rs
+websocket	TEXT	RFC 6455 §5.2	0x1	implementations/typescript/src/transport/shared/websocket-frame.ts	implementations/dotnet/src/Bead.Transport.WebSockets/WebSocketFrame.cs	implementations/rust/crates/bead/src/websocket_frame.rs
+websocket	BINARY	RFC 6455 §5.2	0x2	implementations/typescript/src/transport/shared/websocket-frame.ts	implementations/dotnet/src/Bead.Transport.WebSockets/WebSocketFrame.cs	implementations/rust/crates/bead/src/websocket_frame.rs
+websocket	CLOSE	RFC 6455 §5.2	0x8	implementations/typescript/src/transport/shared/websocket-frame.ts	implementations/dotnet/src/Bead.Transport.WebSockets/WebSocketFrame.cs	implementations/rust/crates/bead/src/websocket_frame.rs
+websocket	PING	RFC 6455 §5.2	0x9	implementations/typescript/src/transport/shared/websocket-frame.ts	implementations/dotnet/src/Bead.Transport.WebSockets/WebSocketFrame.cs	implementations/rust/crates/bead/src/websocket_frame.rs
+websocket	PONG	RFC 6455 §5.2	0xA	implementations/typescript/src/transport/shared/websocket-frame.ts	implementations/dotnet/src/Bead.Transport.WebSockets/WebSocketFrame.cs	implementations/rust/crates/bead/src/websocket_frame.rs
+websocket	FIN_BIT	RFC 6455 §5.2	0x80	implementations/typescript/src/transport/shared/websocket-frame.ts	implementations/dotnet/src/Bead.Transport.WebSockets/WebSocketFrame.cs	implementations/rust/crates/bead/src/websocket_frame.rs
+websocket	RESERVED_MASK	RFC 6455 §5.2	0x70	implementations/typescript/src/transport/shared/websocket-frame.ts	implementations/dotnet/src/Bead.Transport.WebSockets/WebSocketFrame.cs	implementations/rust/crates/bead/src/websocket_frame.rs
+websocket	OPCODE_MASK	RFC 6455 §5.2	0x0F	implementations/typescript/src/transport/shared/websocket-frame.ts	implementations/dotnet/src/Bead.Transport.WebSockets/WebSocketFrame.cs	implementations/rust/crates/bead/src/websocket_frame.rs
+websocket	CONTROL_BIT	RFC 6455 §5.5	0x08	implementations/typescript/src/transport/shared/websocket-frame.ts	implementations/dotnet/src/Bead.Transport.WebSockets/WebSocketFrame.cs	implementations/rust/crates/bead/src/websocket_frame.rs
+websocket	MASK_BIT	RFC 6455 §5.2	0x80	implementations/typescript/src/transport/shared/websocket-frame.ts	implementations/dotnet/src/Bead.Transport.WebSockets/WebSocketFrame.cs	implementations/rust/crates/bead/src/websocket_frame.rs
+websocket	PAYLOAD_LENGTH_MASK	RFC 6455 §5.2	0x7F	implementations/typescript/src/transport/shared/websocket-frame.ts	implementations/dotnet/src/Bead.Transport.WebSockets/WebSocketFrame.cs	implementations/rust/crates/bead/src/websocket_frame.rs
+websocket	EXTENDED_LENGTH_16	RFC 6455 §5.2	126	implementations/typescript/src/transport/shared/websocket-frame.ts	implementations/dotnet/src/Bead.Transport.WebSockets/WebSocketFrame.cs	implementations/rust/crates/bead/src/websocket_frame.rs
+websocket	EXTENDED_LENGTH_64	RFC 6455 §5.2	127	implementations/typescript/src/transport/shared/websocket-frame.ts	implementations/dotnet/src/Bead.Transport.WebSockets/WebSocketFrame.cs	implementations/rust/crates/bead/src/websocket_frame.rs
+websocket	LENGTH_TOP_BIT	RFC 6455 §5.2	0x80	implementations/typescript/src/transport/shared/websocket-frame.ts	implementations/dotnet/src/Bead.Transport.WebSockets/WebSocketFrame.cs	implementations/rust/crates/bead/src/websocket_frame.rs
+websocket	LONGEST_CONTROL_PAYLOAD	RFC 6455 §5.5	125	implementations/typescript/src/transport/shared/websocket-frame.ts	implementations/dotnet/src/Bead.Transport.WebSockets/WebSocketFrame.cs	implementations/rust/crates/bead/src/websocket_frame.rs
+websocket	MASKING_KEY_BYTES	RFC 6455 §5.2	4	implementations/typescript/src/transport/shared/websocket-frame.ts	implementations/dotnet/src/Bead.Transport.WebSockets/WebSocketFrame.cs	implementations/rust/crates/bead/src/websocket_frame.rs
+websocket	LONGEST_HEAD_BYTES	RFC 6455 §5.2	14	implementations/typescript/src/transport/shared/websocket-frame.ts	implementations/dotnet/src/Bead.Transport.WebSockets/WebSocketFrame.cs	implementations/rust/crates/bead/src/websocket_frame.rs
+websocket	NORMAL_CLOSURE	RFC 6455 §7.4.1	1000	implementations/typescript/src/transport/shared/websocket-frame.ts	implementations/dotnet/src/Bead.Core/BrokerParcel.cs#BrokerParcelCodes.NormalClosure	implementations/rust/crates/bead/src/websocket_frame.rs
+websocket	GOING_AWAY	RFC 6455 §7.4.1	1001	implementations/typescript/src/transport/shared/websocket-frame.ts	implementations/dotnet/src/Bead.Core/BrokerParcel.cs#BrokerParcelCodes.GoingAway	implementations/rust/crates/bead/src/websocket_frame.rs
+websocket	PROTOCOL_ERROR	RFC 6455 §7.4.1	1002	implementations/typescript/src/transport/shared/websocket-frame.ts	implementations/dotnet/src/Bead.Core/BrokerParcel.cs#BrokerParcelCodes.ProtocolError	implementations/rust/crates/bead/src/websocket_frame.rs
+websocket	NO_STATUS_RECEIVED	RFC 6455 §7.4.1	1005	-: `ws` and the browser's WebSocket close with it; the side writes no such code	-: the platform's, WebSocketCloseStatus.Empty	implementations/rust/crates/bead/src/websocket_frame.rs
+websocket	ABNORMAL_CLOSURE	RFC 6455 §7.4.1	1006	implementations/typescript/src/transport/shared/websocket-frame.ts	-: WebSocketCloseStatus has no member for it, and the platform reports it	implementations/rust/crates/bead/src/websocket_frame.rs
+websocket	INVALID_FRAME_PAYLOAD_DATA	RFC 6455 §7.4.1	1007	-: `ws` and the browser's WebSocket close with it; the side writes no such code	-: the platform's, WebSocketCloseStatus.InvalidPayloadData	implementations/rust/crates/bead/src/websocket_frame.rs
+websocket	POLICY_VIOLATION	RFC 6455 §7.4.1	1008	implementations/typescript/src/transport/shared/websocket-frame.ts	-: the platform's, WebSocketCloseStatus.PolicyViolation	implementations/rust/crates/bead/src/websocket_frame.rs
+websocket	MESSAGE_TOO_BIG	RFC 6455 §7.4.1	1009	implementations/typescript/src/transport/shared/websocket-frame.ts	implementations/dotnet/src/Bead.Core/BrokerParcel.cs#BrokerParcelCodes.MessageTooBig	implementations/rust/crates/bead/src/websocket_frame.rs
+websocket	TRY_AGAIN_LATER	IANA WebSocket Close Code Number Registry	1013	implementations/typescript/src/transport/shared/websocket-frame.ts	implementations/dotnet/src/Bead.Transport.WebSockets/WebSocketFrame.cs	implementations/rust/crates/bead/src/websocket_frame.rs
+websocket	@reads	RFC 6455	-	implementations/typescript/src/transport/shared/websocket-frame-meter.ts, implementations/typescript/src/transport/shared/broker-parcel.ts, implementations/typescript/src/transport/server/websocket-transport-server.ts, implementations/typescript/src/transport/client/websocket-transport-client.ts	implementations/dotnet/src/Bead.Transport.WebSockets/FrameMeter.cs, implementations/dotnet/src/Bead.Core/BrokerConnection.cs, implementations/dotnet/src/Bead.Core/BrokerSequence.cs	implementations/rust/crates/bead/src/websocket/meter.rs, implementations/rust/crates/bead/src/websocket/connection.rs, implementations/rust/crates/bead/src/broker/parcel.rs, implementations/rust/crates/bead/src/mqtt/websocket.rs
+mqtt	PACKET_TYPE_SHIFT	MQTT 5.0 §2.1.2	4	implementations/typescript/src/transport/shared/mqtt-packets.ts	implementations/dotnet/src/Bead.Transport.Mqtt/MqttPackets.cs	implementations/rust/crates/bead/src/mqtt/packets.rs
+mqtt	CONNECT	MQTT 5.0 §2.1.2, Table 2-1	1	-: MQTT.js writes it	-: MQTTnet writes it	implementations/rust/crates/bead/src/mqtt/packets.rs
+mqtt	CONNACK	MQTT 5.0 §2.1.2, Table 2-1	2	-: MQTT.js writes it	-: MQTTnet writes it	implementations/rust/crates/bead/src/mqtt/packets.rs
+mqtt	PUBLISH	MQTT 5.0 §2.1.2, Table 2-1	3	-: MQTT.js writes it	implementations/dotnet/src/Bead.Transport.Mqtt/MqttPackets.cs	implementations/rust/crates/bead/src/mqtt/packets.rs
+mqtt	PUBACK	MQTT 5.0 §2.1.2, Table 2-1	4	implementations/typescript/src/transport/shared/mqtt-packets.ts#ACKNOWLEDGEMENT_TYPES.PUBACK	implementations/dotnet/src/Bead.Transport.Mqtt/MqttPackets.cs#PubAck	implementations/rust/crates/bead/src/mqtt/packets.rs
+mqtt	SUBSCRIBE	MQTT 5.0 §2.1.2, Table 2-1	8	-: MQTT.js writes it	-: MQTTnet writes it	implementations/rust/crates/bead/src/mqtt/packets.rs
+mqtt	SUBACK	MQTT 5.0 §2.1.2, Table 2-1	9	implementations/typescript/src/transport/shared/mqtt-packets.ts#ACKNOWLEDGEMENT_TYPES.SUBACK	implementations/dotnet/src/Bead.Transport.Mqtt/MqttPackets.cs#SubAck	implementations/rust/crates/bead/src/mqtt/packets.rs
+mqtt	UNSUBSCRIBE	MQTT 5.0 §2.1.2, Table 2-1	10	-: MQTT.js writes it	-: MQTTnet writes it	implementations/rust/crates/bead/src/mqtt/packets.rs
+mqtt	UNSUBACK	MQTT 5.0 §2.1.2, Table 2-1	11	implementations/typescript/src/transport/shared/mqtt-packets.ts#ACKNOWLEDGEMENT_TYPES.UNSUBACK	implementations/dotnet/src/Bead.Transport.Mqtt/MqttPackets.cs#UnsubAck	implementations/rust/crates/bead/src/mqtt/packets.rs
+mqtt	PINGREQ	MQTT 5.0 §2.1.2, Table 2-1	12	-: MQTT.js writes it	-: MQTTnet writes it	implementations/rust/crates/bead/src/mqtt/packets.rs
+mqtt	PINGRESP	MQTT 5.0 §2.1.2, Table 2-1	13	-: MQTT.js writes it	-: MQTTnet writes it	implementations/rust/crates/bead/src/mqtt/packets.rs
+mqtt	DISCONNECT	MQTT 5.0 §2.1.2, Table 2-1	14	-: MQTT.js writes it	-: MQTTnet writes it	implementations/rust/crates/bead/src/mqtt/packets.rs
+mqtt	AUTH	MQTT 5.0 §2.1.2, Table 2-1	15	-: MQTT.js writes it	-: MQTTnet writes it	implementations/rust/crates/bead/src/mqtt/packets.rs
+mqtt	FLAGS_MASK	MQTT 5.0 §2.1.3	0x0F	-: MQTT.js writes it	-: MQTTnet writes it	implementations/rust/crates/bead/src/mqtt/packets.rs
+mqtt	DUP_FLAG	MQTT 5.0 §3.3.1.1	0x08	-: MQTT.js writes it	-: MQTTnet writes it	implementations/rust/crates/bead/src/mqtt/packets.rs
+mqtt	QOS_MASK	MQTT 5.0 §3.3.1.2	0x06	-: MQTT.js writes it	-: MQTTnet writes it	implementations/rust/crates/bead/src/mqtt/packets.rs
+mqtt	QOS_SHIFT	MQTT 5.0 §3.3.1.2	1	-: MQTT.js writes it	-: MQTTnet writes it	implementations/rust/crates/bead/src/mqtt/packets.rs
+mqtt	RETAIN_FLAG	MQTT 5.0 §3.3.1.3	0x01	-: MQTT.js writes it	-: MQTTnet writes it	implementations/rust/crates/bead/src/mqtt/packets.rs
+mqtt	RESERVED_SUBSCRIBE_FLAGS	MQTT 5.0 §2.1.3, Table 2-2	0b0010	-: MQTT.js writes it	-: MQTTnet writes it	implementations/rust/crates/bead/src/mqtt/packets.rs
+mqtt	USER_NAME_FLAG	MQTT 5.0 §3.1.2.8	0x80	-: MQTT.js writes it	-: MQTTnet writes it	implementations/rust/crates/bead/src/mqtt/packets.rs
+mqtt	PASSWORD_FLAG	MQTT 5.0 §3.1.2.9	0x40	-: MQTT.js writes it	-: MQTTnet writes it	implementations/rust/crates/bead/src/mqtt/packets.rs
+mqtt	WILL_RETAIN_BIT	MQTT 5.0 §3.1.2.7	0x20	-: MQTT.js writes it	-: MQTTnet writes it	implementations/rust/crates/bead/src/mqtt/packets.rs
+mqtt	WILL_QOS_MASK	MQTT 5.0 §3.1.2.6	0x18	-: MQTT.js writes it	-: MQTTnet writes it	implementations/rust/crates/bead/src/mqtt/packets.rs
+mqtt	WILL_QOS_SHIFT	MQTT 5.0 §3.1.2.6	3	-: MQTT.js writes it	-: MQTTnet writes it	implementations/rust/crates/bead/src/mqtt/packets.rs
+mqtt	WILL_FLAG	MQTT 5.0 §3.1.2.5	0x04	-: MQTT.js writes it	-: MQTTnet writes it	implementations/rust/crates/bead/src/mqtt/packets.rs
+mqtt	CLEAN_START_BIT	MQTT 5.0 §3.1.2.4	0x02	-: MQTT.js writes it	-: MQTTnet writes it	implementations/rust/crates/bead/src/mqtt/packets.rs
+mqtt	PROTOCOL_VERSION	MQTT 5.0 §3.1.2.2	5	-: MQTT.js writes it	-: MQTTnet writes it	implementations/rust/crates/bead/src/mqtt/packets.rs
+mqtt	SESSION_PRESENT_FLAG	MQTT 5.0 §3.2.2.1.1	0x01	-: MQTT.js writes it	-: MQTTnet writes it	implementations/rust/crates/bead/src/mqtt/packets.rs
+mqtt	CONNACK_RESERVED_MASK	MQTT 5.0 §3.2.2.1	0xFE	-: MQTT.js writes it	-: MQTTnet writes it	implementations/rust/crates/bead/src/mqtt/packets.rs
+mqtt	CONTINUATION_BIT	MQTT 5.0 §1.5.5	0x80	implementations/typescript/src/transport/shared/mqtt-packets.ts	implementations/dotnet/src/Bead.Transport.Mqtt/MqttPackets.cs	implementations/rust/crates/bead/src/mqtt/packets.rs
+mqtt	DIGIT_MASK	MQTT 5.0 §1.5.5	0x7F	implementations/typescript/src/transport/shared/mqtt-packets.ts	implementations/dotnet/src/Bead.Transport.Mqtt/MqttPackets.cs	implementations/rust/crates/bead/src/mqtt/packets.rs
+mqtt	DIGIT_RADIX	MQTT 5.0 §1.5.5	128	implementations/typescript/src/transport/shared/mqtt-packets.ts	-: it places each digit by a shift of seven bits, not by its radix	implementations/rust/crates/bead/src/mqtt/packets.rs
+mqtt	LONGEST_VARIABLE_BYTE_INTEGER	MQTT 5.0 §1.5.5	4	implementations/typescript/src/transport/shared/mqtt-packets.ts	implementations/dotnet/src/Bead.Transport.Mqtt/MqttPackets.cs	implementations/rust/crates/bead/src/mqtt/packets.rs
+mqtt	FIRST_FAILURE	MQTT 5.0 §2.4	0x80	implementations/typescript/src/transport/shared/mqtt-packets.ts	implementations/dotnet/src/Bead.Transport.Mqtt/MqttPackets.cs	implementations/rust/crates/bead/src/mqtt/packets.rs
+mqtt	UNSPECIFIED_ERROR	MQTT 5.0 §2.4, Table 2-6	0x80	implementations/typescript/src/transport/shared/mqtt-packets.ts	-: MQTTnet's enum names it	-: a row of REASON_NAMES names it
+mqtt	SUCCESS	MQTT 5.0 §2.4, Table 2-6	0x00	implementations/typescript/src/transport/shared/mqtt-packets.ts#REASON.SUCCESS	-: MQTTnet's enums name it	implementations/rust/crates/bead/src/mqtt/packets.rs
+mqtt	GRANTED_QOS_1	MQTT 5.0 §2.4, Table 2-6	0x01	-: MQTT.js reads a SUBACK's granted QoS	-: MQTTnet's enums name it	implementations/rust/crates/bead/src/mqtt/packets.rs
+mqtt	NO_MATCHING_SUBSCRIBERS	MQTT 5.0 §2.4, Table 2-6	0x10	implementations/typescript/src/transport/shared/mqtt-packets.ts#REASON.NO_MATCHING_SUBSCRIBERS	-: MQTTnet's enums name it	implementations/rust/crates/bead/src/mqtt/packets.rs
+mqtt	NO_SUBSCRIPTION_EXISTED	MQTT 5.0 §2.4, Table 2-6	0x11	implementations/typescript/src/transport/shared/mqtt-packets.ts#REASON.NO_SUBSCRIPTION_EXISTED	-: MQTTnet's enums name it	implementations/rust/crates/bead/src/mqtt/packets.rs
+mqtt	SESSION_TAKEN_OVER	MQTT 5.0 §2.4, Table 2-6	0x8E	implementations/typescript/src/transport/shared/mqtt-packets.ts#REASON.SESSION_TAKEN_OVER	-: MQTTnet's enums name it	implementations/rust/crates/bead/src/mqtt/packets.rs
+mqtt	SHARED_SUBSCRIPTIONS_NOT_SUPPORTED	MQTT 5.0 §2.4, Table 2-6	0x9E	implementations/typescript/src/transport/shared/mqtt-packets.ts#REASON.SHARED_SUBSCRIPTIONS_NOT_SUPPORTED	-: MQTTnet's enums name it	implementations/rust/crates/bead/src/mqtt/packets.rs
+mqtt	PAYLOAD_FORMAT_INDICATOR	MQTT 5.0 §2.2.2.2, Table 2-4	0x01	-: MQTT.js writes it	-: MQTTnet writes it	implementations/rust/crates/bead/src/mqtt/packets.rs
+mqtt	MESSAGE_EXPIRY_INTERVAL	MQTT 5.0 §2.2.2.2, Table 2-4	0x02	-: MQTT.js writes it	-: MQTTnet writes it	implementations/rust/crates/bead/src/mqtt/packets.rs
+mqtt	CONTENT_TYPE	MQTT 5.0 §2.2.2.2, Table 2-4	0x03	-: MQTT.js writes it	-: MQTTnet writes it	implementations/rust/crates/bead/src/mqtt/packets.rs
+mqtt	RESPONSE_TOPIC	MQTT 5.0 §2.2.2.2, Table 2-4	0x08	-: MQTT.js writes it	-: MQTTnet writes it	implementations/rust/crates/bead/src/mqtt/packets.rs
+mqtt	CORRELATION_DATA	MQTT 5.0 §2.2.2.2, Table 2-4	0x09	-: MQTT.js writes it	-: MQTTnet writes it	implementations/rust/crates/bead/src/mqtt/packets.rs
+mqtt	SUBSCRIPTION_IDENTIFIER	MQTT 5.0 §2.2.2.2, Table 2-4	0x0B	-: MQTT.js writes it	-: MQTTnet writes it	implementations/rust/crates/bead/src/mqtt/packets.rs
+mqtt	SESSION_EXPIRY_INTERVAL	MQTT 5.0 §2.2.2.2, Table 2-4	0x11	-: MQTT.js writes it	-: MQTTnet writes it	implementations/rust/crates/bead/src/mqtt/packets.rs
+mqtt	ASSIGNED_CLIENT_IDENTIFIER	MQTT 5.0 §2.2.2.2, Table 2-4	0x12	-: MQTT.js writes it	-: MQTTnet writes it	implementations/rust/crates/bead/src/mqtt/packets.rs
+mqtt	SERVER_KEEP_ALIVE	MQTT 5.0 §2.2.2.2, Table 2-4	0x13	-: MQTT.js writes it	-: MQTTnet writes it	implementations/rust/crates/bead/src/mqtt/packets.rs
+mqtt	AUTHENTICATION_METHOD	MQTT 5.0 §2.2.2.2, Table 2-4	0x15	-: MQTT.js writes it	-: MQTTnet writes it	implementations/rust/crates/bead/src/mqtt/packets.rs
+mqtt	AUTHENTICATION_DATA	MQTT 5.0 §2.2.2.2, Table 2-4	0x16	-: MQTT.js writes it	-: MQTTnet writes it	implementations/rust/crates/bead/src/mqtt/packets.rs
+mqtt	WILL_DELAY_INTERVAL	MQTT 5.0 §2.2.2.2, Table 2-4	0x18	-: MQTT.js writes it	-: MQTTnet writes it	implementations/rust/crates/bead/src/mqtt/packets.rs
+mqtt	RESPONSE_INFORMATION	MQTT 5.0 §2.2.2.2, Table 2-4	0x1A	-: MQTT.js writes it	-: MQTTnet writes it	implementations/rust/crates/bead/src/mqtt/packets.rs
+mqtt	SERVER_REFERENCE	MQTT 5.0 §2.2.2.2, Table 2-4	0x1C	-: MQTT.js writes it	-: MQTTnet writes it	implementations/rust/crates/bead/src/mqtt/packets.rs
+mqtt	REASON_STRING	MQTT 5.0 §2.2.2.2, Table 2-4	0x1F	-: MQTT.js writes it	-: MQTTnet writes it	implementations/rust/crates/bead/src/mqtt/packets.rs
+mqtt	RECEIVE_MAXIMUM	MQTT 5.0 §2.2.2.2, Table 2-4	0x21	-: MQTT.js writes it	-: MQTTnet writes it	implementations/rust/crates/bead/src/mqtt/packets.rs
+mqtt	TOPIC_ALIAS_MAXIMUM	MQTT 5.0 §2.2.2.2, Table 2-4	0x22	-: MQTT.js writes it	-: MQTTnet writes it	implementations/rust/crates/bead/src/mqtt/packets.rs
+mqtt	TOPIC_ALIAS	MQTT 5.0 §2.2.2.2, Table 2-4	0x23	-: MQTT.js writes it	-: MQTTnet writes it	implementations/rust/crates/bead/src/mqtt/packets.rs
+mqtt	MAXIMUM_QOS	MQTT 5.0 §2.2.2.2, Table 2-4	0x24	-: MQTT.js writes it	-: MQTTnet writes it	implementations/rust/crates/bead/src/mqtt/packets.rs
+mqtt	RETAIN_AVAILABLE	MQTT 5.0 §2.2.2.2, Table 2-4	0x25	-: MQTT.js writes it	-: MQTTnet writes it	implementations/rust/crates/bead/src/mqtt/packets.rs
+mqtt	USER_PROPERTY	MQTT 5.0 §2.2.2.2, Table 2-4	0x26	-: MQTT.js writes it	-: MQTTnet writes it	implementations/rust/crates/bead/src/mqtt/packets.rs
+mqtt	MAXIMUM_PACKET_SIZE_PROPERTY	MQTT 5.0 §2.2.2.2, Table 2-4	0x27	-: MQTT.js writes it	-: MQTTnet writes it	implementations/rust/crates/bead/src/mqtt/packets.rs
+mqtt	WILDCARD_SUBSCRIPTION_AVAILABLE	MQTT 5.0 §2.2.2.2, Table 2-4	0x28	-: MQTT.js writes it	-: MQTTnet writes it	implementations/rust/crates/bead/src/mqtt/packets.rs
+mqtt	SUBSCRIPTION_IDENTIFIERS_AVAILABLE	MQTT 5.0 §2.2.2.2, Table 2-4	0x29	-: MQTT.js writes it	-: MQTTnet writes it	implementations/rust/crates/bead/src/mqtt/packets.rs
+mqtt	SHARED_SUBSCRIPTION_AVAILABLE	MQTT 5.0 §2.2.2.2, Table 2-4	0x2A	-: MQTT.js writes it	-: MQTTnet writes it	implementations/rust/crates/bead/src/mqtt/packets.rs
+mqtt	@reads	MQTT 5.0	-	implementations/typescript/src/transport/shared/mqtt-packet-guard.ts, implementations/typescript/src/transport/shared/mqtt-broker-adapter.ts	implementations/dotnet/src/Bead.Transport.Mqtt/MqttPacketGuard.cs, implementations/dotnet/src/Bead.Transport.Mqtt/MqttBrokerAdapter.cs	implementations/rust/crates/bead/src/mqtt/adapter.rs
+amqp	LIST8	AMQP 1.0 Types §1.6, list	0xC0	implementations/typescript/src/transport/shared/amqp-messages.ts#CODE.LIST8	-: AMQPNetLite writes it	-: the Rust side has no AMQP 1.0 binding
+amqp	NULL	AMQP 1.0 Types §1.6, null	0x40	implementations/typescript/src/transport/shared/amqp-messages.ts#CODE.NULL	-: AMQPNetLite writes it	-: the Rust side has no AMQP 1.0 binding
+amqp	SMALLUINT	AMQP 1.0 Types §1.6, uint	0x52	implementations/typescript/src/transport/shared/amqp-messages.ts#CODE.SMALLUINT	-: AMQPNetLite writes it	-: the Rust side has no AMQP 1.0 binding
+amqp	STR8_UTF8	AMQP 1.0 Types §1.6, string	0xA1	implementations/typescript/src/transport/shared/amqp-messages.ts#CODE.STR8_UTF8	-: AMQPNetLite writes it	-: the Rust side has no AMQP 1.0 binding
+amqp	UINT	AMQP 1.0 Types §1.6, uint	0x70	implementations/typescript/src/transport/shared/amqp-messages.ts#CODE.UINT	-: AMQPNetLite writes it	-: the Rust side has no AMQP 1.0 binding
+amqp	UINT0	AMQP 1.0 Types §1.6, uint	0x43	implementations/typescript/src/transport/shared/amqp-messages.ts#CODE.UINT0	-: AMQPNetLite writes it	-: the Rust side has no AMQP 1.0 binding
+amqp	VBIN32	AMQP 1.0 Types §1.6, binary	0xB0	implementations/typescript/src/transport/shared/amqp-messages.ts#CODE.VBIN32	-: AMQPNetLite writes it	-: the Rust side has no AMQP 1.0 binding
+amqp	VBIN8	AMQP 1.0 Types §1.6, binary	0xA0	implementations/typescript/src/transport/shared/amqp-messages.ts#CODE.VBIN8	-: AMQPNetLite writes it	-: the Rust side has no AMQP 1.0 binding
+amqp	SMALLULONG	AMQP 1.0 Types §1.6, ulong	0x53	implementations/typescript/src/transport/shared/amqp-messages.ts#CODE.SMALLULONG	-: AMQPNetLite writes it	-: the Rust side has no AMQP 1.0 binding
+amqp	DESCRIBED	AMQP 1.0 Types §1.2	0x00	implementations/typescript/src/transport/shared/amqp-messages.ts	-: AMQPNetLite writes it	-: the Rust side has no AMQP 1.0 binding
+amqp	LARGEST_SMALLUINT	AMQP 1.0 Types §1.6, uint	255	implementations/typescript/src/transport/shared/amqp-messages.ts	-: AMQPNetLite writes the ttl, and the count takes it as a uint whatever its value	-: the Rust side has no AMQP 1.0 binding
+amqp	LONGEST_VBIN8	AMQP 1.0 Types §1.6, binary	255	implementations/typescript/src/transport/shared/amqp-messages.ts	implementations/dotnet/src/Bead.Transport.Amqp/AmqpMessages.cs	-: the Rust side has no AMQP 1.0 binding
+amqp	DATA	AMQP 1.0 Messaging §3.2.6	0x75	implementations/typescript/src/transport/shared/amqp-messages.ts#SECTION.DATA	-: AMQPNetLite writes it	-: the Rust side has no AMQP 1.0 binding
+amqp	HEADER	AMQP 1.0 Messaging §3.2.1	0x70	implementations/typescript/src/transport/shared/amqp-messages.ts#SECTION.HEADER	-: AMQPNetLite writes it	-: the Rust side has no AMQP 1.0 binding
+amqp	PROPERTIES	AMQP 1.0 Messaging §3.2.4	0x73	implementations/typescript/src/transport/shared/amqp-messages.ts#SECTION.PROPERTIES	-: AMQPNetLite writes it	-: the Rust side has no AMQP 1.0 binding
+amqp	@reads	AMQP 1.0	-	implementations/typescript/src/transport/shared/amqp-broker-adapter.ts	-: its holder is its one reader	-: the Rust side has no AMQP 1.0 binding
+protobuf	VARINT	Protocol Buffers Encoding, Message Structure	0	implementations/typescript/src/proto/records.ts	implementations/dotnet/src/Bead.Protobuf/ProtoRecords.cs	implementations/rust/crates/bead-protobuf/src/records.rs
+protobuf	I64	Protocol Buffers Encoding, Message Structure	1	implementations/typescript/src/proto/records.ts	implementations/dotnet/src/Bead.Protobuf/ProtoRecords.cs	implementations/rust/crates/bead-protobuf/src/records.rs
+protobuf	LEN	Protocol Buffers Encoding, Message Structure	2	implementations/typescript/src/proto/records.ts	implementations/dotnet/src/Bead.Protobuf/ProtoRecords.cs	implementations/rust/crates/bead-protobuf/src/records.rs
+protobuf	SGROUP	Protocol Buffers Encoding, Message Structure	3	implementations/typescript/src/proto/records.ts	implementations/dotnet/src/Bead.Protobuf/ProtoRecords.cs#SGroup	implementations/rust/crates/bead-protobuf/src/records.rs
+protobuf	EGROUP	Protocol Buffers Encoding, Message Structure	4	implementations/typescript/src/proto/records.ts	implementations/dotnet/src/Bead.Protobuf/ProtoRecords.cs#EGroup	implementations/rust/crates/bead-protobuf/src/records.rs
+protobuf	I32	Protocol Buffers Encoding, Message Structure	5	implementations/typescript/src/proto/records.ts	implementations/dotnet/src/Bead.Protobuf/ProtoRecords.cs	implementations/rust/crates/bead-protobuf/src/records.rs
+protobuf	WIRE_TYPE_MASK	Protocol Buffers Encoding, Message Structure	7	implementations/typescript/src/proto/records.ts	implementations/dotnet/src/Bead.Protobuf/ProtoRecords.cs	implementations/rust/crates/bead-protobuf/src/records.rs
+protobuf	FIELD_NUMBER_SHIFT	Protocol Buffers Encoding, Message Structure	3	implementations/typescript/src/proto/records.ts	implementations/dotnet/src/Bead.Protobuf/ProtoRecords.cs	implementations/rust/crates/bead-protobuf/src/records.rs
+protobuf	CONTINUATION_BIT	Protocol Buffers Encoding, Base 128 Varints	0x80	implementations/typescript/src/proto/records.ts	implementations/dotnet/src/Bead.Protobuf/ProtoRecords.cs	implementations/rust/crates/bead-protobuf/src/records.rs
+protobuf	DIGIT_MASK	Protocol Buffers Encoding, Base 128 Varints	0x7F	implementations/typescript/src/proto/records.ts	implementations/dotnet/src/Bead.Protobuf/ProtoRecords.cs	implementations/rust/crates/bead-protobuf/src/records.rs
+protobuf	DIGIT_BITS	Protocol Buffers Encoding, Base 128 Varints	7	implementations/typescript/src/proto/records.ts	implementations/dotnet/src/Bead.Protobuf/ProtoRecords.cs	implementations/rust/crates/bead-protobuf/src/records.rs
+protobuf	LONGEST_VARINT	Protocol Buffers Encoding, Base 128 Varints	10	implementations/typescript/src/proto/records.ts	implementations/dotnet/src/Bead.Protobuf/ProtoRecords.cs	implementations/rust/crates/bead-protobuf/src/records.rs
+protobuf	LONGEST_TAG	Protocol Buffers Encoding, Message Structure	5	implementations/typescript/src/proto/records.ts	implementations/dotnet/src/Bead.Protobuf/ProtoRecords.cs	implementations/rust/crates/bead-protobuf/src/records.rs
+protobuf	LARGEST_LAST_BYTE_64	Protocol Buffers Encoding, Base 128 Varints	0x01	implementations/typescript/src/proto/records.ts	implementations/dotnet/src/Bead.Protobuf/ProtoRecords.cs	implementations/rust/crates/bead-protobuf/src/records.rs
+protobuf	LARGEST_LAST_BYTE_32	Protocol Buffers Encoding, Base 128 Varints	0x0F	implementations/typescript/src/proto/records.ts	implementations/dotnet/src/Bead.Protobuf/ProtoRecords.cs	implementations/rust/crates/bead-protobuf/src/records.rs
+protobuf	@reads	Protocol Buffers Encoding	-	-: its holder is its one reader	-: its holder is its one reader	-: its holder is its one reader
+unicode	CONTINUATION_MASK	RFC 3629 §3	0xC0	implementations/typescript/src/router/shared/unicode.ts	implementations/dotnet/src/Bead.Core/EnvelopeCodec.cs	implementations/rust/crates/bead/src/envelope.rs
+unicode	CONTINUATION_PREFIX	RFC 3629 §3	0x80	implementations/typescript/src/router/shared/unicode.ts	implementations/dotnet/src/Bead.Core/EnvelopeCodec.cs	implementations/rust/crates/bead/src/envelope.rs
+unicode	FIRST_TWO_BYTE_LEAD	RFC 3629 §4	0xC2	implementations/typescript/src/router/shared/unicode.ts	implementations/dotnet/src/Bead.Core/EnvelopeCodec.cs	implementations/rust/crates/bead/src/envelope.rs
+unicode	LAST_TWO_BYTE_LEAD	RFC 3629 §4	0xDF	implementations/typescript/src/router/shared/unicode.ts	implementations/dotnet/src/Bead.Core/EnvelopeCodec.cs	implementations/rust/crates/bead/src/envelope.rs
+unicode	FIRST_THREE_BYTE_LEAD	RFC 3629 §4	0xE0	implementations/typescript/src/router/shared/unicode.ts	implementations/dotnet/src/Bead.Core/EnvelopeCodec.cs	implementations/rust/crates/bead/src/envelope.rs
+unicode	LAST_THREE_BYTE_LEAD	RFC 3629 §4	0xEF	implementations/typescript/src/router/shared/unicode.ts	implementations/dotnet/src/Bead.Core/EnvelopeCodec.cs	implementations/rust/crates/bead/src/envelope.rs
+unicode	FIRST_FOUR_BYTE_LEAD	RFC 3629 §4	0xF0	implementations/typescript/src/router/shared/unicode.ts	implementations/dotnet/src/Bead.Core/EnvelopeCodec.cs	implementations/rust/crates/bead/src/envelope.rs
+unicode	LAST_FOUR_BYTE_LEAD	RFC 3629 §4	0xF4	implementations/typescript/src/router/shared/unicode.ts	implementations/dotnet/src/Bead.Core/EnvelopeCodec.cs	implementations/rust/crates/bead/src/envelope.rs
+unicode	FIRST_TWO_BYTE_CODE_POINT	RFC 3629 §3	0x80	implementations/typescript/src/router/shared/unicode.ts	-: the platform's Encoding.UTF8 counts a string's bytes	-: a str's own length counts its bytes
+unicode	FIRST_THREE_BYTE_CODE_POINT	RFC 3629 §3	0x800	implementations/typescript/src/router/shared/unicode.ts	-: the platform's Encoding.UTF8 counts a string's bytes	-: a str's own length counts its bytes
+unicode	FIRST_SUPPLEMENTARY	RFC 2781 §2.1	0x10000	-: it reads a pair by its bounds and leaves the code point to the platform	implementations/dotnet/src/Bead.Protobuf/Validators.cs	implementations/rust/crates/bead-protobuf/src/json_form/text.rs
+unicode	FIRST_HIGH_SURROGATE	RFC 2781 §2.2	0xD800	implementations/typescript/src/router/shared/unicode.ts	implementations/dotnet/src/Bead.Protobuf/Validators.cs	implementations/rust/crates/bead-protobuf/src/json_form/text.rs
+unicode	LAST_HIGH_SURROGATE	RFC 2781 §2.2	0xDBFF	implementations/typescript/src/router/shared/unicode.ts	-: it reads the surrogates as one range, from the first high to the last low	implementations/rust/crates/bead-protobuf/src/json_form/text.rs
+unicode	FIRST_LOW_SURROGATE	RFC 2781 §2.2	0xDC00	implementations/typescript/src/router/shared/unicode.ts	-: it reads the surrogates as one range, from the first high to the last low	implementations/rust/crates/bead-protobuf/src/json_form/text.rs
+unicode	LAST_LOW_SURROGATE	RFC 2781 §2.2	0xDFFF	implementations/typescript/src/router/shared/unicode.ts	implementations/dotnet/src/Bead.Protobuf/Validators.cs	implementations/rust/crates/bead-protobuf/src/json_form/text.rs
+unicode	SURROGATE_MASK	RFC 2781 §2.2	0xFC00	implementations/typescript/src/router/shared/unicode.ts	-: it reads a unit against the surrogates' bounds, by no mask	-: it reads a unit against the surrogates' bounds, by no mask
+unicode	SURROGATE_BITS	RFC 2781 §2.1	10	-: it reads a pair by its bounds and leaves the code point to the platform	-: it orders a unit by offsets of the surrogates' bounds, with no shift	implementations/rust/crates/bead-protobuf/src/json_form/text.rs
+unicode	BYTE_ORDER_MARK	RFC 8259 §8.1	-: the TypeScript side reads it as its UTF-16 unit, the others as its UTF-8 bytes	implementations/typescript/src/router/shared/unicode.ts	-: its ByteOrderMark spans stand in Bead.Core/Payloads.cs and Bead.Transcoding/JsonText.cs, outside the gate's modules	implementations/rust/crates/bead-protobuf/src/json_form/text.rs
+unicode	@reads	RFC 3629, RFC 2781	-	implementations/typescript/src/router/shared/envelope.ts, implementations/typescript/src/router/shared/intake.ts, implementations/typescript/src/router/shared/payloads.ts, implementations/typescript/src/proto/pattern.ts, implementations/typescript/src/transcoding/json-form.ts	-: its holders are their own readers	-: its holders are their own readers
+json	BEGIN_ARRAY	RFC 8259 §2	0x5B	implementations/typescript/src/router/shared/payloads.ts	-: it reads char literals and System.Text.Json	-: it matches the character by its own byte literal, in a pattern
+json	END_ARRAY	RFC 8259 §2	0x5D	implementations/typescript/src/router/shared/payloads.ts	-: it reads char literals and System.Text.Json	-: it matches the character by its own byte literal, in a pattern
+json	BEGIN_OBJECT	RFC 8259 §2	0x7B	implementations/typescript/src/router/shared/payloads.ts	-: it reads char literals and System.Text.Json	-: it matches the character by its own byte literal, in a pattern
+json	END_OBJECT	RFC 8259 §2	0x7D	implementations/typescript/src/router/shared/payloads.ts	-: it reads char literals and System.Text.Json	-: it matches the character by its own byte literal, in a pattern
+json	NAME_SEPARATOR	RFC 8259 §2	0x3A	implementations/typescript/src/router/shared/payloads.ts	-: it reads char literals and System.Text.Json	-: it matches the character by its own byte literal, in a pattern
+json	VALUE_SEPARATOR	RFC 8259 §2	0x2C	implementations/typescript/src/router/shared/payloads.ts	-: it reads char literals and System.Text.Json	-: it matches the character by its own byte literal, in a pattern
+json	QUOTATION_MARK	RFC 8259 §7	0x22	implementations/typescript/src/router/shared/payloads.ts	-: it reads char literals and System.Text.Json	implementations/rust/crates/bead/src/json.rs
+json	ESCAPE	RFC 8259 §7	0x5C	implementations/typescript/src/router/shared/payloads.ts	-: it reads char literals and System.Text.Json	implementations/rust/crates/bead/src/json.rs
+json	SPACE	RFC 8259 §2	0x20	implementations/typescript/src/router/shared/payloads.ts	-: it reads char literals and System.Text.Json	-: it matches the character by its own byte literal, in a pattern
+json	HORIZONTAL_TAB	RFC 8259 §2	0x09	implementations/typescript/src/router/shared/payloads.ts	-: it reads char literals and System.Text.Json	-: it matches the character by its own byte literal, in a pattern
+json	LINE_FEED	RFC 8259 §2	0x0A	implementations/typescript/src/router/shared/payloads.ts	-: it reads char literals and System.Text.Json	-: it matches the character by its own byte literal, in a pattern
+json	CARRIAGE_RETURN	RFC 8259 §2	0x0D	implementations/typescript/src/router/shared/payloads.ts	-: it reads char literals and System.Text.Json	-: it matches the character by its own byte literal, in a pattern
+json	MINUS	RFC 8259 §6	0x2D	implementations/typescript/src/router/shared/payloads.ts	-: it reads char literals and System.Text.Json	-: it matches the character by its own byte literal, in a pattern
+json	DIGIT_ZERO	RFC 8259 §6	0x30	implementations/typescript/src/router/shared/payloads.ts	-: it reads char literals and System.Text.Json	-: it matches the character by its own byte literal, in a pattern
+json	DIGIT_NINE	RFC 8259 §6	0x39	implementations/typescript/src/router/shared/payloads.ts	-: it reads char literals and System.Text.Json	-: it matches the character by its own byte literal, in a pattern
+json	LAST_CONTROL_CHARACTER	RFC 8259 §7	0x1F	-: JSON.parse refuses a control character in a string	-: it reads char literals and System.Text.Json	implementations/rust/crates/bead/src/json.rs, implementations/rust/crates/bead-protobuf/src/json_form/text.rs
+json	@reads	RFC 8259	-	implementations/typescript/src/transcoding/json-form.ts	-: it reads char literals and System.Text.Json	-: its holders are their own readers

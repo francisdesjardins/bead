@@ -227,6 +227,11 @@ export const RULES = Object.freeze([
     areas: ['commits'],
   },
   {
+    why: "the wire formats' names, whose modules each side's lint reads",
+    patterns: ['tools/wire-names.tsv'],
+    areas: ['commits', 'typescript', 'dotnet', 'rust'],
+  },
+  {
     why: 'the versions, which spec/check.py reads too',
     patterns: tool('check-versions'),
     areas: ['commits', 'spec'],
