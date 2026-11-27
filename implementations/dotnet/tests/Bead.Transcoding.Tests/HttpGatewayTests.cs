@@ -2406,6 +2406,31 @@ public sealed class HttpGatewayTests
         await gateway.Stop();
     }
 
+    // transcoding 3.9
+    [Fact]
+    public async Task Refuses_a_gateway_s_routes_for_each_route_s_own_rules_before_a_tie_between_two()
+    {
+        await using var service = await TranscodingService.Start();
+        var options = Exchanges.OptionsOf(service.Memory, null);
+        var p = RouteOf("echo") with { Routes = [new HttpRouteTemplate { Method = "GET", Template = "/a" }] };
+        var q = RouteOf("echo") with { Routes = [new HttpRouteTemplate { Method = "GET", Template = "/a" }] };
+        var r = RouteOf("getBook") with { Routes = [new HttpRouteTemplate { Method = "GET", Template = "/a/**/b" }] };
+
+        string RefusalOf(IReadOnlyList<HttpRoute> routes)
+        {
+            return Assert.Throws<ArgumentException>(() =>
+            {
+                _ = new HttpGateway(options with { Routes = routes });
+            }).Message;
+        }
+
+        // * the template off its grammar is refused, though the tie comes before it
+        Assert.Equal("getBook's route GET /a/**/b: a ** that is not its last segment (Parameter 'options')", RefusalOf([p, q, r]));
+
+        // and the tie alone is refused for the tie
+        Assert.Equal("echo's route GET /a ties echo's route GET /a (Parameter 'options')", RefusalOf([p, q]));
+    }
+
     [Fact]
     public async Task Refuses_a_payload_of_no_schema_nor_encoding_a_notification_only_one_side_has_and_a_route_of_no_method_or_no_template()
     {
